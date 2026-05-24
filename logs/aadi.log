@@ -1,0 +1,360 @@
+2026-05-11 23:11:33 | INFO     | aadi.main | ============================================================
+2026-05-11 23:11:33 | INFO     | aadi.main | Aadi starting up …
+2026-05-11 23:11:33 | INFO     | aadi.main | ============================================================
+2026-05-11 23:11:44 | INFO     | aadi.components.wake_word | Wake word backend: openwakeword (primary)
+2026-05-11 23:12:18 | INFO     | aadi.components.tools | Web search backend: ddgs (new package)
+2026-05-11 23:12:19 | INFO     | aadi.main | Initialising components …
+2026-05-11 23:12:19 | INFO     | aadi.components.config_loader | Loaded 4 personalities from 'data/personalities.json'
+2026-05-11 23:12:19 | INFO     | aadi.components.personality | PersonalityManager ready. Active: 'default'  Available: ['default', 'study', 'chill', 'professional']
+2026-05-11 23:12:19 | INFO     | aadi.components.memory | Loaded 40 messages from memory file 'data/conversation_memory.json'.
+2026-05-11 23:12:27 | INFO     | aadi.components.tts | Kokoro TTS pipeline loaded (lang=a).
+2026-05-11 23:12:27 | INFO     | aadi.components.tts | TTS engine: kokoro
+2026-05-11 23:12:27 | INFO     | aadi.components.tools | 'yt-dlp' resolved via candidate path: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:12:27 | INFO     | aadi.components.tools | 'mpv' resolved via config: C:\Users\91760\mpv.exe
+2026-05-11 23:12:27 | INFO     | aadi.components.llm_brain | LLMBrain ready — model=qwen2.5:3b  connect=10s  read=120s  retries=1
+2026-05-11 23:12:29 | INFO     | aadi.components.llm_brain | Model 'qwen2.5:3b' is available in Ollama. ✓
+2026-05-11 23:12:29 | ERROR    | aadi.components.wake_word | openwakeword failed to load: Could not find pretrained model for model name 'hey_aadi'
+Run once manually to pre-download models:
+  python -c "from openwakeword.model import Model; Model(wakeword_models=['hey_aadi'])"
+Traceback (most recent call last):
+  File "C:\Users\91760\OneDrive\Desktop\Aadi_The_Agent\components\wake_word.py", line 114, in _load_openwakeword
+    self._model = OWWModel(
+                  ^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\utils.py", line 686, in wrapped
+    return func(*args, **new_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\model.py", line 97, in __init__
+    raise ValueError("Could not find pretrained model for model name '{}'".format(i))
+ValueError: Could not find pretrained model for model name 'hey_aadi'
+2026-05-11 23:12:29 | INFO     | aadi.components.audio_recorder | AudioRecorder initialised — VAD aggressiveness=2, silence threshold=0.7s
+2026-05-11 23:12:29 | INFO     | aadi.components.stt | Loading faster-whisper model 'base' on cpu (compute_type=int8) …
+2026-05-11 23:12:30 | INFO     | aadi.components.stt | faster-whisper model loaded successfully.
+2026-05-11 23:12:30 | INFO     | aadi.components.language_detector | LanguageDetector ready. Supported: ['en', 'hi']
+2026-05-11 23:12:30 | INFO     | aadi.components.interruption_handler | InterruptionHandler ready (RMS threshold=0.030).
+2026-05-11 23:12:30 | INFO     | aadi.components.music_listener | MusicCommandListener ready (RMS threshold=0.035, record=1.8s).
+2026-05-11 23:12:30 | INFO     | aadi.main | All components initialised successfully.
+2026-05-11 23:12:30 | INFO     | aadi.main | Startup greeting: Aadi online. All systems nominal. Say 'Hey Aadi' whenever you're ready.
+2026-05-11 23:12:45 | WARNING  | aadi.components.wake_word | Wake word unavailable — always-on mode. Fix: pip install openwakeword
+2026-05-11 23:12:49 | INFO     | aadi.main | Entering conversation loop (follow-up window: 30 s).
+2026-05-11 23:12:49 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:12:49 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:12:50 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:12:50 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:12:51 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:12:51 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:12:59 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:12:59 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:13:01 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:13:01 | INFO     | aadi.components.audio_recorder | Recording complete — 2.61 seconds captured.
+2026-05-11 23:13:03 | INFO     | aadi.components.stt | Transcription [lang=hi, lang_prob=0.75]: 'Tell me about banana.'
+2026-05-11 23:13:03 | INFO     | aadi.main | User said: 'Tell me about banana.' [lang=hi]
+2026-05-11 23:13:05 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:13:54 | INFO     | aadi.components.llm_brain | Intent (LLM): 'search'  query='banana'  ack='Sure Aadi, let me look that up for you.'
+2026-05-11 23:13:54 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=search
+2026-05-11 23:14:01 | INFO     | aadi.components.llm_brain | Acknowledgement spoken: 'Sure Aadi, let me look that up for you.'
+2026-05-11 23:14:01 | INFO     | aadi.components.tools | Web search: 'banana'
+2026-05-11 23:14:04 | INFO     | aadi.components.tools | Web search: 5 usable results assembled.
+2026-05-11 23:14:22 | INFO     | aadi.components.llm_brain | Search final answer: Bananas are botanically berries produced by plants in the genus Musa, typically elongated and curved with soft starchy f
+2026-05-11 23:14:22 | INFO     | aadi.main | Aadi final response: 'Bananas are botanically berries produced by plants in the genus Musa, typically elongated and curved with soft starchy f' [intent=search]
+2026-05-11 23:14:35 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:14:35 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:14:36 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:14:36 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:14:37 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:14:37 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:14:45 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:14:45 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:14:46 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:14:46 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:14:47 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:14:47 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:14:54 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:14:54 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:14:57 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:14:57 | INFO     | aadi.components.audio_recorder | Recording complete — 2.67 seconds captured.
+2026-05-11 23:14:58 | INFO     | aadi.components.stt | Transcription [lang=id, lang_prob=0.62]: 'kan yuk boleh?'
+2026-05-11 23:14:58 | INFO     | aadi.main | User said: 'kan yuk boleh?' [lang=id]
+2026-05-11 23:14:58 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:14:58 | INFO     | aadi.components.memory | Context too long (814 tokens). Summarising 39 old messages …
+2026-05-11 23:16:02 | INFO     | aadi.components.memory | Context compressed. New size: 86 tokens.
+2026-05-11 23:16:54 | INFO     | aadi.components.llm_brain | Intent (LLM): 'none'  query='kan yuk'  ack='Sure Aadi, let me look that up for you.'
+2026-05-11 23:16:54 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=none
+2026-05-11 23:16:54 | INFO     | aadi.components.llm_brain | Phase 3: conversational LLM call.
+2026-05-11 23:17:18 | INFO     | aadi.main | Aadi final response: 'Banana is a common term used for the fruit, but you might also be referring to the plant itself or other related fruits.' [intent=None]
+2026-05-11 23:17:33 | INFO     | aadi.components.interruption_handler | Interruption detected (RMS=0.1552). Stopping TTS.
+2026-05-11 23:17:34 | INFO     | aadi.components.tts | TTS playback interrupted.
+2026-05-11 23:17:34 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:17:34 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:17:35 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:17:35 | INFO     | aadi.components.audio_recorder | Recording complete — 1.08 seconds captured.
+2026-05-11 23:17:36 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:17:36 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:17:44 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:17:44 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:17:48 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:17:48 | INFO     | aadi.components.audio_recorder | Recording complete — 4.17 seconds captured.
+2026-05-11 23:17:50 | INFO     | aadi.components.stt | Transcription [lang=hi, lang_prob=0.59]: 'Play song Vaharupul Varsao.'
+2026-05-11 23:17:50 | INFO     | aadi.main | User said: 'Play song Vaharupul Varsao.' [lang=hi]
+2026-05-11 23:17:50 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:18:44 | INFO     | aadi.components.llm_brain | Intent (LLM): 'music'  query='Vaharupul Varsao'  ack='Playing Vaharupul Varsao for you, Aadi.'
+2026-05-11 23:18:44 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=music
+2026-05-11 23:18:50 | INFO     | aadi.components.llm_brain | Acknowledgement spoken: 'Playing Vaharupul Varsao for you, Aadi.'
+2026-05-11 23:18:50 | INFO     | aadi.components.tools | Music tool: searching for 'song Vaharupul Varsao.'
+2026-05-11 23:18:50 | INFO     | aadi.components.tools | Running yt-dlp: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:18:50 | INFO     | aadi.main | Aadi final response: 'Playing song Vaharupul Varsao. for you.' [intent=music]
+2026-05-11 23:18:50 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:18:50 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:18:51 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:18:51 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:18:52 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:18:52 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:18:53 | INFO     | aadi.components.tools | Streaming URL (first 80 chars): https://rr6---sn-gwpa-a3vek.googlevideo.com/videoplayback?expire=1778543333&ei=h
+2026-05-11 23:18:54 | INFO     | aadi.components.tools | mpv launched (pid=12456). Music playing flag SET.
+2026-05-11 23:18:59 | INFO     | aadi.components.music_listener | MusicCommandListener: listening for stop commands …
+2026-05-11 23:18:59 | INFO     | aadi.components.music_listener | MusicCommandListener thread started.
+2026-05-11 23:19:13 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.72]: 'Start the song.'
+2026-05-11 23:19:13 | INFO     | aadi.components.music_listener | MusicListener heard: 'Start the song.'
+2026-05-11 23:19:18 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:19:26 | INFO     | aadi.components.stt | Transcription [lang=de, lang_prob=0.41]: 'Copyright WDR 2020'
+2026-05-11 23:19:26 | INFO     | aadi.components.music_listener | MusicListener heard: 'Copyright WDR 2020'
+2026-05-11 23:19:34 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.67]: 'Stop. Stop. Stop. Stop. Stop. Stop.'
+2026-05-11 23:19:34 | INFO     | aadi.components.music_listener | MusicListener heard: 'Stop. Stop. Stop. Stop. Stop. Stop.'
+2026-05-11 23:19:34 | INFO     | aadi.components.music_listener | Stop command detected. Killing music.
+2026-05-11 23:19:34 | INFO     | aadi.components.tools | Music stopped.
+2026-05-11 23:19:34 | INFO     | aadi.components.tools | Music playback finished.
+2026-05-11 23:19:34 | INFO     | aadi.components.tools | Music playing flag CLEARED.
+2026-05-11 23:19:37 | INFO     | aadi.components.music_listener | MusicCommandListener thread stopped.
+2026-05-11 23:19:37 | INFO     | aadi.main | Music ended. Resuming normal conversation loop.
+2026-05-11 23:19:37 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:19:37 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:19:38 | INFO     | aadi.components.music_listener | MusicCommandListener: stopped.
+2026-05-11 23:19:46 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:19:46 | INFO     | aadi.components.audio_recorder | Recording complete — 1.65 seconds captured.
+2026-05-11 23:19:48 | INFO     | aadi.components.stt | Transcription [lang=ar, lang_prob=0.47]: 'Hello.'
+2026-05-11 23:19:48 | INFO     | aadi.main | User said: 'Hello.' [lang=ar]
+2026-05-11 23:19:48 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:19:54 | INFO     | aadi.components.llm_brain | Intent (LLM): 'none'  query=''  ack='Sure Aadi, how can I assist you today?'
+2026-05-11 23:19:54 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=none
+2026-05-11 23:19:54 | INFO     | aadi.components.llm_brain | Phase 3: conversational LLM call.
+2026-05-11 23:20:19 | INFO     | aadi.main | Aadi final response: 'Hello! How can I assist you today?' [intent=None]
+2026-05-11 23:20:26 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:20:26 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:20:27 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:20:28 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:20:28 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:20:28 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:20:36 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:20:36 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:20:37 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:20:37 | INFO     | aadi.components.audio_recorder | Recording complete — 1.11 seconds captured.
+2026-05-11 23:20:38 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:20:38 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:20:46 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:20:46 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:20:50 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:20:50 | INFO     | aadi.components.audio_recorder | Recording complete — 4.41 seconds captured.
+2026-05-11 23:20:52 | INFO     | aadi.components.stt | Transcription [lang=hi, lang_prob=0.35]: 'Play song Baharu Pool Varsau.'
+2026-05-11 23:20:52 | INFO     | aadi.main | User said: 'Play song Baharu Pool Varsau.' [lang=hi]
+2026-05-11 23:20:52 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:21:42 | INFO     | aadi.components.llm_brain | Intent (LLM): 'music'  query='Baharu Pool Varsau'  ack='Playing Baharu Pool Varsau for you, Aadi.'
+2026-05-11 23:21:42 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=music
+2026-05-11 23:21:48 | INFO     | aadi.components.llm_brain | Acknowledgement spoken: 'Playing Baharu Pool Varsau for you, Aadi.'
+2026-05-11 23:21:48 | INFO     | aadi.components.tools | Music tool: searching for 'song Baharu Pool Varsau.'
+2026-05-11 23:21:48 | INFO     | aadi.components.tools | Running yt-dlp: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:21:48 | INFO     | aadi.main | Aadi final response: 'Playing song Baharu Pool Varsau. for you.' [intent=music]
+2026-05-11 23:21:48 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:21:48 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:21:49 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:21:49 | INFO     | aadi.components.audio_recorder | Recording complete — 1.08 seconds captured.
+2026-05-11 23:21:50 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:21:50 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:21:58 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:21:58 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:21:59 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:21:59 | INFO     | aadi.components.audio_recorder | Recording complete — 1.11 seconds captured.
+2026-05-11 23:22:00 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:22:00 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:22:07 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:22:07 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:22:10 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:22:10 | INFO     | aadi.components.audio_recorder | Recording complete — 2.31 seconds captured.
+2026-05-11 23:22:12 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.31]: 'Turn down the system.'
+2026-05-11 23:22:12 | INFO     | aadi.main | User said: 'Turn down the system.' [lang=en]
+2026-05-11 23:22:12 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:22:18 | INFO     | aadi.components.llm_brain | Intent (LLM): 'none'  query=''  ack='Sure Aadi, I'll adjust the volume for you.'
+2026-05-11 23:22:18 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=none
+2026-05-11 23:22:18 | INFO     | aadi.components.llm_brain | Phase 3: conversational LLM call.
+2026-05-11 23:22:33 | ERROR    | aadi.components.tools | Music tool error: Command '['C:\\Users\\91760\\AppData\\Roaming\\Python\\Python311\\Scripts\\yt-dlp.exe', 'ytsearch1:song Baharu Pool Varsau.', '--get-url', '--format', 'bestaudio/best', '--no-playlist', '--no-warnings', '-q']' timed out after 45 seconds
+Traceback (most recent call last):
+  File "C:\Users\91760\OneDrive\Desktop\Aadi_The_Agent\components\tools.py", line 264, in _stream
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python311\Lib\subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python311\Lib\subprocess.py", line 1209, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python311\Lib\subprocess.py", line 1630, in _communicate
+    raise TimeoutExpired(self.args, orig_timeout)
+subprocess.TimeoutExpired: Command '['C:\\Users\\91760\\AppData\\Roaming\\Python\\Python311\\Scripts\\yt-dlp.exe', 'ytsearch1:song Baharu Pool Varsau.', '--get-url', '--format', 'bestaudio/best', '--no-playlist', '--no-warnings', '-q']' timed out after 45 seconds
+2026-05-11 23:22:40 | INFO     | aadi.components.tools | Music playing flag CLEARED.
+2026-05-11 23:22:51 | INFO     | aadi.main | Aadi final response: 'I seem to be a text-based assistant, not capable of adjusting audio settings in your environment. How can I assist you f' [intent=None]
+2026-05-11 23:23:07 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:23:07 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:23:09 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:23:09 | INFO     | aadi.components.audio_recorder | Recording complete — 1.14 seconds captured.
+2026-05-11 23:23:10 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:23:10 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:23:17 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:23:17 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:23:20 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:23:20 | INFO     | aadi.components.audio_recorder | Recording complete — 2.79 seconds captured.
+2026-05-11 23:23:22 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.51]: 'Shut down the system.'
+2026-05-11 23:23:22 | INFO     | aadi.main | User said: 'Shut down the system.' [lang=en]
+2026-05-11 23:23:22 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:23:29 | INFO     | aadi.main | Shutdown requested by user.
+2026-05-11 23:23:29 | INFO     | aadi.main | Aadi shutdown requested (Ctrl+C or user command).
+2026-05-11 23:23:35 | INFO     | aadi.main | Aadi pipeline exited cleanly.
+2026-05-11 23:39:38 | INFO     | aadi.main | ============================================================
+2026-05-11 23:39:38 | INFO     | aadi.main | Aadi starting up …
+2026-05-11 23:39:38 | INFO     | aadi.main | ============================================================
+2026-05-11 23:39:40 | INFO     | aadi.components.wake_word | Wake word backend: openwakeword (primary)
+2026-05-11 23:39:45 | INFO     | aadi.components.tools | Web search backend: ddgs (new package)
+2026-05-11 23:39:46 | INFO     | aadi.main | Initialising components …
+2026-05-11 23:39:46 | INFO     | aadi.components.config_loader | Loaded 4 personalities from 'data/personalities.json'
+2026-05-11 23:39:46 | INFO     | aadi.components.personality | PersonalityManager ready. Active: 'default'  Available: ['default', 'study', 'chill', 'professional']
+2026-05-11 23:39:46 | INFO     | aadi.components.memory | Loaded 14 messages from memory file 'data/conversation_memory.json'.
+2026-05-11 23:39:50 | INFO     | aadi.components.tts | Kokoro TTS pipeline loaded (lang=a).
+2026-05-11 23:39:50 | INFO     | aadi.components.tts | TTS engine: kokoro
+2026-05-11 23:39:50 | INFO     | aadi.components.tools | 'yt-dlp' resolved via candidate path: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:39:50 | INFO     | aadi.components.tools | 'mpv' resolved via config: C:\Users\91760\mpv.exe
+2026-05-11 23:39:50 | INFO     | aadi.components.llm_brain | LLMBrain ready — model=qwen2.5:0.5b  connect=10s  read=120s  retries=1
+2026-05-11 23:39:52 | INFO     | aadi.components.llm_brain | Model 'qwen2.5:0.5b' is available in Ollama. ✓
+2026-05-11 23:39:52 | ERROR    | aadi.components.wake_word | openwakeword failed to load: Could not find pretrained model for model name 'hey_aadi'
+Run once manually to pre-download models:
+  python -c "from openwakeword.model import Model; Model(wakeword_models=['hey_aadi'])"
+Traceback (most recent call last):
+  File "C:\Users\91760\OneDrive\Desktop\Aadi_The_Agent\components\wake_word.py", line 114, in _load_openwakeword
+    self._model = OWWModel(
+                  ^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\utils.py", line 686, in wrapped
+    return func(*args, **new_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\model.py", line 97, in __init__
+    raise ValueError("Could not find pretrained model for model name '{}'".format(i))
+ValueError: Could not find pretrained model for model name 'hey_aadi'
+2026-05-11 23:39:52 | INFO     | aadi.components.audio_recorder | AudioRecorder initialised — VAD aggressiveness=2, silence threshold=0.7s
+2026-05-11 23:39:52 | INFO     | aadi.components.stt | Loading faster-whisper model 'small' on cpu (compute_type=int8) …
+2026-05-11 23:40:53 | INFO     | aadi.main | ============================================================
+2026-05-11 23:40:53 | INFO     | aadi.main | Aadi starting up …
+2026-05-11 23:40:53 | INFO     | aadi.main | ============================================================
+2026-05-11 23:40:55 | INFO     | aadi.components.wake_word | Wake word backend: openwakeword (primary)
+2026-05-11 23:41:02 | INFO     | aadi.components.tools | Web search backend: ddgs (new package)
+2026-05-11 23:41:02 | INFO     | aadi.main | Initialising components …
+2026-05-11 23:41:02 | INFO     | aadi.components.config_loader | Loaded 4 personalities from 'data/personalities.json'
+2026-05-11 23:41:02 | INFO     | aadi.components.personality | PersonalityManager ready. Active: 'default'  Available: ['default', 'study', 'chill', 'professional']
+2026-05-11 23:41:02 | INFO     | aadi.components.memory | Loaded 14 messages from memory file 'data/conversation_memory.json'.
+2026-05-11 23:41:08 | INFO     | aadi.components.tts | Kokoro TTS pipeline loaded (lang=a).
+2026-05-11 23:41:08 | INFO     | aadi.components.tts | TTS engine: kokoro
+2026-05-11 23:41:09 | INFO     | aadi.components.tools | 'yt-dlp' resolved via candidate path: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:41:09 | INFO     | aadi.components.tools | 'mpv' resolved via config: C:\Users\91760\mpv.exe
+2026-05-11 23:41:09 | INFO     | aadi.components.llm_brain | LLMBrain ready — model=qwen2.5:0.5b  connect=10s  read=120s  retries=1
+2026-05-11 23:41:11 | INFO     | aadi.components.llm_brain | Model 'qwen2.5:0.5b' is available in Ollama. ✓
+2026-05-11 23:41:11 | ERROR    | aadi.components.wake_word | openwakeword failed to load: Could not find pretrained model for model name 'qwen2.5:0.5b'
+Run once manually to pre-download models:
+  python -c "from openwakeword.model import Model; Model(wakeword_models=['hey_aadi'])"
+Traceback (most recent call last):
+  File "C:\Users\91760\OneDrive\Desktop\Aadi_The_Agent\components\wake_word.py", line 114, in _load_openwakeword
+    self._model = OWWModel(
+                  ^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\utils.py", line 686, in wrapped
+    return func(*args, **new_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\91760\AppData\Roaming\Python\Python311\site-packages\openwakeword\model.py", line 97, in __init__
+    raise ValueError("Could not find pretrained model for model name '{}'".format(i))
+ValueError: Could not find pretrained model for model name 'qwen2.5:0.5b'
+2026-05-11 23:41:11 | INFO     | aadi.components.audio_recorder | AudioRecorder initialised — VAD aggressiveness=2, silence threshold=0.7s
+2026-05-11 23:41:11 | INFO     | aadi.components.stt | Loading faster-whisper model 'small' on cpu (compute_type=int8) …
+2026-05-11 23:44:42 | INFO     | aadi.components.stt | faster-whisper model loaded successfully.
+2026-05-11 23:44:42 | INFO     | aadi.components.language_detector | LanguageDetector ready. Supported: ['en', 'hi']
+2026-05-11 23:44:42 | INFO     | aadi.components.interruption_handler | InterruptionHandler ready (RMS threshold=0.030).
+2026-05-11 23:44:42 | INFO     | aadi.components.music_listener | MusicCommandListener ready (RMS threshold=0.035, record=1.8s).
+2026-05-11 23:44:42 | INFO     | aadi.main | All components initialised successfully.
+2026-05-11 23:44:42 | INFO     | aadi.main | Startup greeting: Aadi online. All systems nominal. Say 'Hey Aadi' whenever you're ready.
+2026-05-11 23:44:55 | WARNING  | aadi.components.wake_word | Wake word unavailable — always-on mode. Fix: pip install openwakeword
+2026-05-11 23:44:59 | INFO     | aadi.main | Entering conversation loop (follow-up window: 30 s).
+2026-05-11 23:44:59 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:44:59 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:45:01 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:45:01 | INFO     | aadi.components.audio_recorder | Recording complete — 1.05 seconds captured.
+2026-05-11 23:45:03 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:45:03 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:45:12 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:45:12 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:45:13 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:45:13 | INFO     | aadi.components.audio_recorder | Recording complete — 1.02 seconds captured.
+2026-05-11 23:45:16 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:45:16 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:48:21 | INFO     | aadi.main | Follow-up timeout reached. Returning to wake word mode.
+2026-05-11 23:48:30 | WARNING  | aadi.components.wake_word | Wake word unavailable — always-on mode. Fix: pip install openwakeword
+2026-05-11 23:48:33 | INFO     | aadi.main | Entering conversation loop (follow-up window: 30 s).
+2026-05-11 23:48:33 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:48:33 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:48:34 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:48:34 | INFO     | aadi.components.audio_recorder | Recording complete — 1.08 seconds captured.
+2026-05-11 23:48:37 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:48:37 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:48:44 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:48:44 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:48:45 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:48:46 | INFO     | aadi.components.audio_recorder | Recording complete — 1.11 seconds captured.
+2026-05-11 23:48:48 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:48:48 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:48:55 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:48:55 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:49:01 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:49:01 | INFO     | aadi.components.audio_recorder | Recording complete — 5.79 seconds captured.
+2026-05-11 23:49:07 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.47]: 'Play song Kaede se from Metro Indino.'
+2026-05-11 23:49:07 | INFO     | aadi.main | User said: 'Play song Kaede se from Metro Indino.' [lang=en]
+2026-05-11 23:49:07 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:49:16 | INFO     | aadi.components.llm_brain | Intent (LLM): 'music'  query='play song Kaede se from Metro Indino'  ack=''
+2026-05-11 23:49:16 | INFO     | aadi.components.llm_brain | Phase 1 done — intent=music
+2026-05-11 23:49:16 | INFO     | aadi.components.tools | Music tool: searching for 'song Kaede se from Metro Indino.'
+2026-05-11 23:49:16 | INFO     | aadi.components.tools | Running yt-dlp: C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe
+2026-05-11 23:49:16 | INFO     | aadi.main | Aadi final response: 'Playing song Kaede se from Metro Indino. for you.' [intent=music]
+2026-05-11 23:49:16 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:49:16 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:49:18 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:49:18 | INFO     | aadi.components.audio_recorder | Recording complete — 1.08 seconds captured.
+2026-05-11 23:49:20 | INFO     | aadi.components.tools | Streaming URL (first 80 chars): https://rr1---sn-gwpa-a3vk.googlevideo.com/videoplayback?expire=1778545159&ei=px
+2026-05-11 23:49:20 | INFO     | aadi.components.tools | mpv launched (pid=2648). Music playing flag SET.
+2026-05-11 23:49:21 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:49:21 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:49:28 | INFO     | aadi.components.music_listener | MusicCommandListener: listening for stop commands …
+2026-05-11 23:49:28 | INFO     | aadi.components.music_listener | MusicCommandListener thread started.
+2026-05-11 23:52:20 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.32]: 'Stop music.'
+2026-05-11 23:52:20 | INFO     | aadi.components.music_listener | MusicListener heard: 'Stop music.'
+2026-05-11 23:52:20 | INFO     | aadi.components.music_listener | Stop command detected. Killing music.
+2026-05-11 23:52:20 | INFO     | aadi.components.tools | Music stopped.
+2026-05-11 23:52:20 | INFO     | aadi.components.tools | Music playback finished.
+2026-05-11 23:52:20 | INFO     | aadi.components.tools | Music playing flag CLEARED.
+2026-05-11 23:52:22 | INFO     | aadi.components.music_listener | MusicCommandListener thread stopped.
+2026-05-11 23:52:22 | INFO     | aadi.main | Music ended. Resuming normal conversation loop.
+2026-05-11 23:52:22 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:52:22 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:52:23 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:52:23 | INFO     | aadi.components.audio_recorder | Recording complete — 0.87 seconds captured.
+2026-05-11 23:52:24 | INFO     | aadi.components.music_listener | MusicCommandListener: stopped.
+2026-05-11 23:52:27 | WARNING  | aadi.components.stt | Discarding transcription — too short ('', len=0 < 2).
+2026-05-11 23:52:27 | WARNING  | aadi.main | Transcription returned empty text. Skipping.
+2026-05-11 23:52:35 | INFO     | aadi.main | Waiting for user speech …
+2026-05-11 23:52:35 | INFO     | aadi.components.audio_recorder | Recording started — listening for speech …
+2026-05-11 23:52:37 | INFO     | aadi.components.audio_recorder | End of speech detected after 0.7 s silence.
+2026-05-11 23:52:37 | INFO     | aadi.components.audio_recorder | Recording complete — 2.58 seconds captured.
+2026-05-11 23:52:44 | INFO     | aadi.components.stt | Transcription [lang=en, lang_prob=0.94]: 'Shut down the system.'
+2026-05-11 23:52:44 | INFO     | aadi.main | User said: 'Shut down the system.' [lang=en]
+2026-05-11 23:52:44 | INFO     | aadi.main | Language resolved: en
+2026-05-11 23:52:52 | INFO     | aadi.main | Shutdown requested by user.
+2026-05-11 23:52:52 | INFO     | aadi.main | Aadi shutdown requested (Ctrl+C or user command).
+2026-05-11 23:52:59 | INFO     | aadi.main | Aadi pipeline exited cleanly.

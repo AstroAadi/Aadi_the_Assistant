@@ -1,0 +1,67 @@
+# ============================================================
+# Aadi Voice Assistant — Python Dependencies
+# Python 3.11 | Windows 10/11 & Raspberry Pi 5 compatible
+# ============================================================
+# Install with:
+#   pip install -r requirements.txt
+#
+# IMPORTANT WINDOWS PRE-REQUISITES (install manually):
+#   1. espeak-ng  — Required by Kokoro TTS for phoneme generation
+#      Download: https://github.com/espeak-ng/espeak-ng/releases
+#      (e.g. espeak-ng-20191129-b702b03-x64.msi)
+#   2. mpv.exe    — Audio/video player for music streaming
+#      Already installed per user setup.
+#   3. yt-dlp     — Already installed per user setup.
+#   4. Ollama     — Already running per user setup.
+# ============================================================
+
+# --- Wake Word ---
+# openwakeword is the PRIMARY backend — stable API, auto-downloads ONNX models.
+openwakeword>=0.6.0            # pip install openwakeword
+# pyopen-wakeword is kept as a listed fallback but has a known v1.1.0 bug on
+# Windows where OpenWakeWordFeatures() requires positional args unexpectedly.
+# If openwakeword is installed, pyopen-wakeword is never used.
+# pyopen-wakeword>=1.1.0       # only needed if openwakeword fails to install
+
+# --- Audio I/O ---
+sounddevice>=0.4.6            # cross-platform audio input/output via numpy
+numpy>=1.24.0                 # array processing for audio
+
+# --- Voice Activity Detection ---
+# webrtcvad does NOT build on Windows without MSVC.
+# Use the pre-built wheel package instead — it is a drop-in replacement
+# that exposes the exact same `import webrtcvad` API:
+webrtcvad-wheels>=2.0.10.post1  # pre-built wheel, no C compiler needed on Windows
+
+# --- Speech to Text ---
+faster-whisper>=1.0.0         # CTranslate2-based Whisper, fast CPU inference
+
+# --- Language Model ---
+requests>=2.31.0              # HTTP client for Ollama REST API
+
+# --- Text to Speech (Primary) ---
+kokoro>=0.9.4                 # Kokoro-82M TTS, fast on CPU
+# kokoro also requires espeak-ng (see above) and misaki for G2P:
+misaki[en]>=0.1.0             # English G2P for Kokoro
+# For Hindi support, add: misaki[hi] if/when available
+
+# --- Text to Speech (Fallback) ---
+# piper-tts>=1.2.0            # Uncomment if using pip-installed piper
+# (User has piper installed separately at C:\piper\ — no pip install needed)
+
+# --- Tools ---
+ddgs>=1.0.0                   # Web search (renamed from duckduckgo-search). pip install ddgs
+# duckduckgo-search           # legacy name — kept as fallback in code if ddgs not installed
+
+# --- Language Detection ---
+langdetect>=1.0.9             # Language identification from text
+
+# --- Utilities ---
+# No additional deps needed — json, threading, subprocess are stdlib
+
+# ============================================================
+# OPTIONAL / DEV
+# ============================================================
+# silero-vad>=5.1.2           # Alternative VAD (heavier, more accurate)
+# torch>=2.0.0                # Required if using silero-vad directly
+# ============================================================

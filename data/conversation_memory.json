@@ -1,0 +1,69 @@
+{
+  "saved_at": "2026-05-11T23:49:16",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[Summary of earlier conversation]: I couldn't tell which personality to switch to. Try: 'switch to study mode'."
+    },
+    {
+      "role": "assistant",
+      "content": "I'm here to assist you. Is there a specific task or question you need help with?"
+    },
+    {
+      "role": "user",
+      "content": "Tell me about banana."
+    },
+    {
+      "role": "assistant",
+      "content": "Bananas are botanically berries produced by plants in the genus Musa, typically elongated and curved with soft starchy flesh."
+    },
+    {
+      "role": "user",
+      "content": "kan yuk boleh?"
+    },
+    {
+      "role": "assistant",
+      "content": "Banana is a common term used for the fruit, but you might also be referring to the plant itself or other related fruits. What exactly are you looking for information about?"
+    },
+    {
+      "role": "user",
+      "content": "Play song Vaharupul Varsao."
+    },
+    {
+      "role": "assistant",
+      "content": "Playing song Vaharupul Varsao. for you."
+    },
+    {
+      "role": "user",
+      "content": "Hello."
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "content": "Play song Baharu Pool Varsau."
+    },
+    {
+      "role": "assistant",
+      "content": "Playing song Baharu Pool Varsau. for you."
+    },
+    {
+      "role": "user",
+      "content": "Turn down the system."
+    },
+    {
+      "role": "assistant",
+      "content": "I seem to be a text-based assistant, not capable of adjusting audio settings in your environment. How can I assist you further with something else?"
+    },
+    {
+      "role": "user",
+      "content": "Play song Kaede se from Metro Indino."
+    },
+    {
+      "role": "assistant",
+      "content": "Playing song Kaede se from Metro Indino. for you."
+    }
+  ]
+}

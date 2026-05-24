@@ -1,0 +1,78 @@
+{
+  "audio": {
+    "mic_device_index": null,
+    "speaker_device_index": null,
+    "sample_rate": 16000,
+    "channels": 1,
+    "chunk_duration_ms": 30,
+    "record_max_seconds": 30
+  },
+  "wake_word": {
+    "model": "qwen2.5:0.5b",
+    "sensitivity": 0.5,
+    "refractory_seconds": 2.0
+  },
+  "stt": {
+    "model_size": "small",
+    "device": "cpu",
+    "compute_type": "int8",
+    "language": null,
+    "beam_size": 5,
+    "_noise_guard_note": "Lower min_lang_prob / raise max_no_speech_prob if real speech is being discarded. Raise min_lang_prob / lower max_no_speech_prob if background noise leaks through.",
+    "min_lang_prob": 0.30,
+    "max_no_speech_prob": 0.80,
+    "min_text_length": 2,
+    "allowed_languages": ["en", "hi"],
+    "_allowed_languages_note": "Whisper hallucinations (Korean, Turkish etc from fan noise) are discarded if detected language is not in this list. Set to null to accept all languages.",
+    "initial_prompt": "Speak in English or Hindi only.",
+    "_initial_prompt_note": "Biases Whisper decoder towards English/Hindi tokens from the first frame, preventing Korean/Turkish hallucinations."
+  },
+  "vad": {
+    "aggressiveness": 2,
+    "silence_threshold_seconds": 0.7,
+    "min_speech_duration_ms": 300
+  },
+  "llm": {
+    "ollama_url": "http://localhost:11434",
+    "model": "qwen2.5:0.5b",
+    "_model_options_note": {
+      "qwen2.5:0.5b": "FASTEST — 397MB, runs great on i3. Use this for speed.",
+      "phi3:mini": "2.2GB — better quality than 0.5b, still fast on CPU.",
+      "qwen2.5:3b": "Smarter but slower — 1.9GB, use if you need better reasoning."
+    },
+    "temperature": 0.7,
+    "max_tokens": 150,
+    "context_token_limit": 3000,
+    "connect_timeout_s": 10,
+    "read_timeout_s": 120,
+    "max_retries": 1
+  },
+  "tts": {
+    "engine": "kokoro",
+    "kokoro_voice_en": "af_sarah",
+    "kokoro_voice_hi": "hf_alpha",
+    "kokoro_lang_en": "a",
+    "kokoro_lang_hi": "h",
+    "piper_exe": "piper",
+    "piper_model_en": "C:\\piper\\voices\\en_US-amy-medium.onnx",
+    "piper_model_hi": "C:\\piper\\voices\\hi_IN-medium.onnx",
+    "mpv_path": "C:\\Users\\91760\\mpv.exe",
+    "speed": 1.0
+  },
+  "memory": {
+    "session_file": "data/conversation_memory.json",
+    "max_history_tokens": 800,
+    "summary_keep_recent": 4
+  },
+  "tools": {
+    "yt_dlp_path": "yt-dlp",
+    "_yt_dlp_path_note": "If yt-dlp is not on PATH, set the full path e.g. C:\\Users\\91760\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\yt-dlp.exe",
+    "mpv_path": "C:\\Users\\91760\\mpv.exe",
+    "music_quality": "bestaudio/best",
+    "search_max_results": 5
+  },
+  "personalities_file": "data/personalities.json",
+  "follow_up_timeout_seconds": 30,
+  "log_file": "logs/aadi.log",
+  "log_level": "INFO"
+}
