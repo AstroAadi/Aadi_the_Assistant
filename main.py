@@ -3,19 +3,32 @@ main.py — Aadi Voice Assistant — Main Pipeline
 
 Entry point and orchestrator for all Aadi components.
 
+Everything runs on this machine. The only outbound network call in the whole
+pipeline is the DuckDuckGo query behind the "search" tool, because a web
+search has to leave the machine by definition. Wake word, STT, the LLM
+(Ollama on localhost), and TTS are all local.
+
+Models
+------
+    wake word  openwakeword ONNX (~5 MB)
+    STT        faster-whisper, int8 on CPU, English + Hindi auto-detect
+    LLM        Ollama, two models: a small router for intent, a larger
+               bilingual model for replies (see components/llm_brain.py)
+    TTS        Kokoro-82M — one model covers English ("a") and Hindi ("h")
+
 Pipeline flow
 -------------
 1.  Load config → initialise all components.
 2.  Play startup greeting.
 3.  Outer loop: WAKE WORD
-    a. WakeWordDetector blocks until "hey aadi" is heard.
+    a. WakeWordDetector blocks until the wake word is heard.
     b. Play a short chime / acknowledgement.
     c. Inner loop: FOLLOW-UP CONVERSATION (30-second window)
        i.   AudioRecorder captures utterance (VAD end-of-speech).
        ii.  SpeechToText transcribes → text.
        iii. LanguageDetector identifies language.
        iv.  ConversationMemory.add_user_message().
-       v.   LLMBrain.respond() → spoken text + optional intent.
+       v.   LLMBrain.respond() → spoken text, intent, ack_spoken flag.
        vi.  ConversationMemory.add_assistant_message().
        vii. InterruptionHandler starts monitoring.
        viii.TTS.speak_streaming() plays the response.
@@ -31,6 +44,7 @@ Run from the project root:
 
 import argparse
 import os
+import re
 import sys
 import threading
 import time
@@ -137,8 +151,11 @@ def build_pipeline(config: dict):
     # Inject speak_fn so LLMBrain can speak acknowledgements mid-pipeline
     llm.set_speak_fn(lambda text, lang="en": tts.speak(text, lang))
 
-    # Wire summarise_fn into memory now that LLM exists
-    memory._summarise_fn = llm.generate_raw
+    # Wire summarise_fn into memory now that LLM exists.
+    # Deliberately llm.summarise (small router model) and not generate_raw:
+    # summarisation fires mid-turn, so running it on the 4B chat model would
+    # stall the conversation for the better part of a minute on a 2-core CPU.
+    memory._summarise_fn = llm.summarise
 
     # --- Other components ---
     wake_word = WakeWordDetector(config)
@@ -180,12 +197,36 @@ def build_pipeline(config: dict):
 # ---------------------------------------------------------------------------
 # Helper: speak safely (catches errors so pipeline never dies on TTS fault)
 # ---------------------------------------------------------------------------
-def safe_speak(tts: TextToSpeech, text: str, lang: str = "en") -> None:
+def safe_speak(
+    tts: TextToSpeech,
+    text: str,
+    lang: str = "en",
+    voice=None,
+) -> None:
     """Speak ``text`` catching all exceptions."""
     try:
-        tts.speak_streaming(text, lang)
+        tts.speak_streaming(text, lang, voice)
     except Exception as exc:
         log.error("TTS error during speak: %s", exc, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Language code normalisation
+# ---------------------------------------------------------------------------
+# Personality files historically stored Kokoro lang codes ("a" = American
+# English, "h" = Hindi) in tts_lang, while the pipeline speaks in ISO codes
+# ("en"/"hi"). Accept either spelling so old personality files keep working.
+_LANG_ALIASES = {
+    "a": "en", "b": "en", "en": "en", "eng": "en", "english": "en",
+    "h": "hi", "hi": "hi", "hin": "hi", "hindi": "hi",
+}
+
+
+def _normalise_lang(lang) -> str:
+    """Map any accepted language spelling to 'en'/'hi'. Empty input → ''."""
+    if not lang:
+        return ""
+    return _LANG_ALIASES.get(str(lang).strip().lower(), "")
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +276,7 @@ def conversation_loop(components: dict) -> None:
         # main recorder so song audio is never transcribed as user speech.
         # ----------------------------------------------------------------
         if tools.is_music_playing:
-            if not music_listener._active:
+            if not music_listener.is_active:
                 music_listener.start()
             # Poll until music stops, then stop the listener
             tools.music_playing.wait(timeout=0.5)
@@ -246,7 +287,7 @@ def conversation_loop(components: dict) -> None:
             continue
 
         # Music just stopped — make sure listener is stopped
-        if music_listener._active:
+        if music_listener.is_active:
             music_listener.stop()
 
         # --- Record speech ---
@@ -275,7 +316,7 @@ def conversation_loop(components: dict) -> None:
         log.info("Language resolved: %s", user_lang)
 
         # --- Check for built-in commands before LLM ---
-        if _handle_builtin_command(text, components):
+        if _handle_builtin_command(text, components, user_lang):
             last_interaction = time.monotonic()
             continue
 
@@ -286,20 +327,30 @@ def conversation_loop(components: dict) -> None:
         system_prompt = personality.system_prompt
         conversation_messages = memory.get_messages(system_prompt=system_prompt)
 
+        # Personality overrides.
+        #   tts_lang  — "en"/"hi" to pin the spoken language, null to follow
+        #               the language the user actually spoke (the sane default
+        #               for a bilingual assistant).
+        #   tts_voice — a Kokoro voice name. Applied by the TTS layer only
+        #               when it belongs to the language being spoken, so an
+        #               English personality voice never mangles Devanagari.
         voice_override = personality.tts_voice
-        lang_override  = personality.tts_lang
-        effective_lang = lang_override if lang_override else user_lang
+        effective_lang = _normalise_lang(personality.tts_lang) or user_lang
 
         # _ack_speak: speaks acknowledgement synchronously with interruption monitoring
-        def _ack_speak(ack_text: str, ack_lang: str = "en") -> None:
+        def _ack_speak(ack_text: str, ack_lang: str = "") -> None:
             TTS_STOP_EVENT.clear()
             interruption.start_monitoring()
             try:
-                tts.speak_streaming(ack_text, effective_lang)
+                tts.speak_streaming(
+                    ack_text,
+                    _normalise_lang(ack_lang) or effective_lang,
+                    voice_override,
+                )
             finally:
                 interruption.stop_monitoring()
 
-        spoken_response, intent = llm.respond(
+        spoken_response, intent, ack_spoken = llm.respond(
             text,
             conversation_messages,
             speak_fn=_ack_speak,
@@ -311,26 +362,36 @@ def conversation_loop(components: dict) -> None:
         memory.add_assistant_message(spoken_response)
 
         # --- Speak final answer ---
-        # For tool intents (music, timer) the ack already told the user what's
-        # happening — the tool confirmation string is often identical or redundant.
-        # Only speak the final response if it adds new information.
+        # For tool intents (music, timer, …) the acknowledgement already told
+        # the user what is happening, so the tool's confirmation string is
+        # redundant. But only skip it if an acknowledgement was ACTUALLY
+        # spoken — a router that returns an empty ack would otherwise leave
+        # the user in total silence.
         _TOOL_INTENTS_ACK_IS_FINAL = {"music", "timer", "personality", "clear_memory"}
-        skip_final_speak = intent in _TOOL_INTENTS_ACK_IS_FINAL
+        skip_final_speak = ack_spoken and intent in _TOOL_INTENTS_ACK_IS_FINAL
 
-        if not skip_final_speak:
+        if skip_final_speak:
+            log.debug("Final speak skipped — acknowledgement already covered it.")
+        else:
             TTS_STOP_EVENT.clear()
             interruption.start_monitoring()
             try:
-                tts.speak_streaming(spoken_response, effective_lang)
+                tts.speak_streaming(spoken_response, effective_lang, voice_override)
             finally:
                 interruption.stop_monitoring()
 
         last_interaction = time.monotonic()
 
 
-def _handle_builtin_command(text: str, components: dict) -> bool:
+def _handle_builtin_command(
+    text: str, components: dict, user_lang: str = "en"
+) -> bool:
     """
     Check for hardcoded Aadi commands that bypass the LLM.
+
+    These are matched locally with keywords, so they respond instantly and
+    work even when Ollama is down. Hindi and Hinglish phrasings are included
+    because they are the ones people actually use mid-song.
 
     Returns True if a command was handled (caller should continue the loop).
 
@@ -340,6 +401,8 @@ def _handle_builtin_command(text: str, components: dict) -> bool:
         Transcribed user text.
     components : dict
         All component instances.
+    user_lang : str
+        Detected language, used to pick the spoken confirmation.
 
     Returns
     -------
@@ -351,41 +414,56 @@ def _handle_builtin_command(text: str, components: dict) -> bool:
     personality: PersonalityManager = components["personality"]
     memory: ConversationMemory = components["memory"]
 
+    hi = user_lang == "hi"
+
+    def _say(en: str, hindi: str) -> None:
+        safe_speak(tts, hindi if hi else en, "hi" if hi else "en")
+
     # --- Stop / pause music ---
     if any(kw in text_lower for kw in (
         "stop music", "stop playing", "pause music", "stop the music",
         "stop song", "turn off music", "kill music",
+        # Hindi / Hinglish
+        "band karo", "band kar", "gaana band", "ruk ja", "ruk jao",
+        "rok do", "mat bajao", "गाना बंद", "बंद करो", "रोक दो",
     )):
         tools: ToolRegistry = components["tools"]
         ml: MusicCommandListener = components["music_listener"]
         tools._stop_music()
         ml.stop()
-        safe_speak(tts, "Music stopped.")
+        _say("Music stopped.", "गाना बंद कर दिया।")
         return True
 
     # --- Shutdown ---
-    if any(kw in text_lower for kw in ("shutdown", "shut down", "goodbye aadi", "exit aadi")):
-        safe_speak(tts, "Goodbye! Shutting down now.")
+    if any(kw in text_lower for kw in (
+        "shutdown", "shut down", "goodbye aadi", "exit aadi",
+        "so jao", "band ho jao", "सो जाओ",
+    )):
+        _say("Goodbye! Shutting down now.", "अलविदा! बंद हो रहा हूँ।")
         log.info("Shutdown requested by user.")
         raise KeyboardInterrupt  # propagates to main() for clean exit
 
     # --- Clear memory (shorthand) ---
-    if "clear memory" in text_lower or "forget everything" in text_lower:
+    if any(kw in text_lower for kw in (
+        "clear memory", "forget everything", "सब भूल जाओ", "memory clear",
+    )):
         memory.clear()
-        safe_speak(tts, "Done. Memory cleared.")
+        _say("Done. Memory cleared.", "ठीक है, मेमोरी साफ़ कर दी।")
         return True
 
     # --- Personality switch (direct command, bypasses LLM routing) ---
-    import re
-    m = re.search(r"\b(switch|change)\s+to\s+(\w+)(?:\s+mode)?", text_lower)
+    m = re.search(r"\b(switch|change|go)\s+(?:to|into)\s+(\w+)(?:\s+mode)?", text_lower)
     if m:
         key = m.group(2)
         success, name = personality.switch(key)
         if success:
-            safe_speak(tts, f"Switched to {name} mode.")
+            _say(f"Switched to {name} mode.", f"{name} मोड चालू कर दिया।")
         else:
             avail = ", ".join(personality.list_personalities())
-            safe_speak(tts, f"I don't have a {key} mode. Available: {avail}.")
+            _say(
+                f"I don't have a {key} mode. Available: {avail}.",
+                f"मेरे पास {key} मोड नहीं है। उपलब्ध हैं: {avail}।",
+            )
         return True
 
     return False

@@ -8,16 +8,23 @@
     "record_max_seconds": 30
   },
   "wake_word": {
-    "model": "qwen2.5:0.5b",
+    "model": "hey_jarvis",
+    "_model_note": "openwakeword PRETRAINED models only: alexa, hey_mycroft, hey_jarvis, hey_rhasspy, ok_nabu, timer, weather. 'hey_aadi' is NOT a pretrained model — to say 'Hey Aadi' you must train a custom model (https://github.com/dscripka/openWakeWord#training-new-models) and point custom_model_path at the resulting .onnx file.",
+    "custom_model_path": null,
+    "_custom_model_path_note": "Absolute path to a custom .onnx wake word model. When set, it overrides 'model'.",
     "sensitivity": 0.5,
-    "refractory_seconds": 2.0
+    "refractory_seconds": 2.0,
+    "allow_always_on_fallback": true,
+    "_allow_always_on_fallback_note": "If true and no wake word model can load, Aadi skips wake word detection and goes straight to conversation mode. Set false to make a load failure loud instead of silent."
   },
   "stt": {
     "model_size": "small",
+    "_model_size_note": "tiny/base/small/medium/large-v3-turbo. 'small' is the practical ceiling on a 2-core CPU (~4-7 s per utterance). large-v3-turbo has better Hindi accuracy but costs 2-3x more time without a GPU.",
     "device": "cpu",
     "compute_type": "int8",
     "language": null,
     "beam_size": 5,
+    "cpu_threads": 4,
     "_noise_guard_note": "Lower min_lang_prob / raise max_no_speech_prob if real speech is being discarded. Raise min_lang_prob / lower max_no_speech_prob if background noise leaks through.",
     "min_lang_prob": 0.30,
     "max_no_speech_prob": 0.80,
@@ -25,7 +32,11 @@
     "allowed_languages": ["en", "hi"],
     "_allowed_languages_note": "Whisper hallucinations (Korean, Turkish etc from fan noise) are discarded if detected language is not in this list. Set to null to accept all languages.",
     "initial_prompt": "Speak in English or Hindi only.",
-    "_initial_prompt_note": "Biases Whisper decoder towards English/Hindi tokens from the first frame, preventing Korean/Turkish hallucinations."
+    "_initial_prompt_note": "Biases Whisper decoder towards English/Hindi tokens from the first frame, preventing Korean/Turkish hallucinations.",
+    "low_confidence_retry": true,
+    "low_confidence_threshold": 0.55,
+    "retry_language": "hi",
+    "_low_confidence_retry_note": "Bilingual safety net. When auto-detect returns a language with confidence below low_confidence_threshold, the SAME model re-runs once with language forced to retry_language, and the pass with the better average log-probability wins. Costs one extra pass only on ambiguous audio, and zero extra RAM."
   },
   "vad": {
     "aggressiveness": 2,
@@ -34,17 +45,31 @@
   },
   "llm": {
     "ollama_url": "http://localhost:11434",
-    "model": "qwen2.5:0.5b",
-    "_model_options_note": {
-      "qwen2.5:0.5b": "FASTEST — 397MB, runs great on i3. Use this for speed.",
-      "phi3:mini": "2.2GB — better quality than 0.5b, still fast on CPU.",
-      "qwen2.5:3b": "Smarter but slower — 1.9GB, use if you need better reasoning."
+    "router_model": "qwen2.5:0.5b",
+    "chat_model": "gemma3:4b",
+    "_two_model_note": "Phase 1 (intent routing) emits English-only JSON and must be fast — a 0.5B model is ideal. Phase 3 writes the actual reply and must handle Hindi Devanagari — Gemma's 262k vocab tokenises Devanagari far more efficiently than Qwen's, which matters a lot on a CPU. Ollama keeps both resident via keep_alive.",
+    "_chat_model_options": {
+      "gemma3:4b": "3.3GB — best Hindi+English balance for a 2-core CPU. RECOMMENDED.",
+      "gemma4:e2b-it": "~1.2GB — fastest option with usable Hindi. Try if gemma3:4b feels slow.",
+      "gemma4:e4b-it": "~2.8GB — newer, slightly better than gemma3:4b if available.",
+      "qwen3:1.7b": "1.1GB — fast, Hindi is passable but weaker than Gemma.",
+      "qwen2.5:0.5b": "0.4GB — fallback only. Hindi output is unreliable at this size."
     },
+    "fallback_to_router_model": true,
+    "_fallback_note": "If chat_model is not pulled in Ollama, fall back to router_model instead of failing. Set false to fail loudly.",
     "temperature": 0.7,
     "max_tokens": 150,
+    "router_max_tokens": 60,
+    "search_answer_max_tokens": 80,
+    "summary_max_tokens": 160,
+    "num_ctx": 2048,
+    "router_num_ctx": 1024,
+    "num_thread": 4,
+    "_num_thread_note": "Match physical+logical core count. This machine is 2 cores / 4 threads.",
+    "keep_alive": "10m",
     "context_token_limit": 3000,
     "connect_timeout_s": 10,
-    "read_timeout_s": 120,
+    "read_timeout_s": 180,
     "max_retries": 1
   },
   "tts": {
@@ -53,10 +78,12 @@
     "kokoro_voice_hi": "hf_alpha",
     "kokoro_lang_en": "a",
     "kokoro_lang_hi": "h",
+    "_kokoro_note": "Kokoro covers BOTH languages in one 82M model: lang_code 'a' (American English) and 'h' (Hindi). Hindi needs espeak-ng installed for phonemes. Voice prefixes: af_/am_ = US English, bf_/bm_ = UK English, hf_/hm_ = Hindi.",
     "piper_exe": "piper",
-    "piper_model_en": "C:\\piper\\voices\\en_US-amy-medium.onnx",
-    "piper_model_hi": "C:\\piper\\voices\\hi_IN-medium.onnx",
-    "mpv_path": "C:\\Users\\91760\\mpv.exe",
+    "piper_model_en": null,
+    "piper_model_hi": null,
+    "_piper_note": "Fallback engine only. Set absolute .onnx paths to enable, e.g. C:\\piper\\voices\\en_US-amy-medium.onnx",
+    "mpv_path": null,
     "speed": 1.0
   },
   "memory": {
@@ -65,9 +92,9 @@
     "summary_keep_recent": 4
   },
   "tools": {
-    "yt_dlp_path": "yt-dlp",
-    "_yt_dlp_path_note": "If yt-dlp is not on PATH, set the full path e.g. C:\\Users\\91760\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\yt-dlp.exe",
-    "mpv_path": "C:\\Users\\91760\\mpv.exe",
+    "yt_dlp_path": null,
+    "mpv_path": null,
+    "_path_note": "Leave null to auto-discover: PATH, the active venv's Scripts folder, your user profile, and common install locations are all searched at startup. Set an absolute path only to override.",
     "music_quality": "bestaudio/best",
     "search_max_results": 5
   },

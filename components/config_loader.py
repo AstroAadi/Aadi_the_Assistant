@@ -80,7 +80,40 @@ def load_personalities(personalities_path: str) -> Dict[str, Any]:
         }
 
     with open(personalities_path, "r", encoding="utf-8") as fh:
-        personalities = json.load(fh)
+        raw = json.load(fh)
 
-    log.info("Loaded %d personalities from '%s'", len(personalities), personalities_path)
+    # Keys starting with "_" are documentation notes (JSON has no comments),
+    # and anything that isn't an object can't be a personality definition.
+    personalities = {
+        key: value
+        for key, value in raw.items()
+        if not key.startswith("_") and isinstance(value, dict)
+    }
+
+    skipped = len(raw) - len(personalities)
+    log.info(
+        "Loaded %d personalities from '%s'%s",
+        len(personalities),
+        personalities_path,
+        f" ({skipped} note/invalid entr{'y' if skipped == 1 else 'ies'} skipped)"
+        if skipped else "",
+    )
+
+    if not personalities:
+        log.error(
+            "No valid personalities found in '%s'. Using built-in default.",
+            personalities_path,
+        )
+        return {
+            "default": {
+                "name": "Aadi",
+                "system_prompt": (
+                    "You are Aadi, a helpful voice assistant. "
+                    "Keep answers concise and conversational."
+                ),
+                "tts_voice": None,
+                "tts_lang": None,
+            }
+        }
+
     return personalities

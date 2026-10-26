@@ -1,0 +1,92 @@
+# ============================================================
+# Aadi Voice Assistant — .gitignore
+# ============================================================
+
+# --- Python bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Packaging / build ---
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# --- Test & lint caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ============================================================
+# Aadi runtime state — regenerated on every run, never shared
+# ============================================================
+
+# Rotating logs. These contain full transcripts of everything spoken
+# to Aadi, so they are private as well as noisy.
+# logs/ is recreated automatically by components/logger.py.
+logs/
+*.log
+*.log.[0-9]
+
+# Conversation memory — your actual conversation history.
+# data/ itself is kept because personalities.json lives there.
+data/conversation_memory.json
+
+# --- Local model weights ---
+# Whisper / Kokoro caches live in ~/.cache, not here. This covers a
+# `models/` folder if you keep local weights alongside the project.
+# NOTE: *.onnx is deliberately NOT ignored — a custom-trained
+# "hey aadi" wake word model is small and worth committing.
+models/
+*.ckpt
+*.safetensors
+*.gguf
+
+# --- Audio scratch files ---
+# Debug clips and recordings. Force-add with `git add -f` if you
+# ever need to commit a reference clip (e.g. for voice cloning).
+recordings/
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# ============================================================
+# Secrets & machine-specific overrides
+# ============================================================
+# Aadi is fully local and needs no API keys, but keep this here so a
+# stray credentials file can never be committed by accident.
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+config.local.json
+
+# ============================================================
+# Editors & OS
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Kiro steering, hooks and specs are intentionally tracked —
+# they are project configuration, not local state.

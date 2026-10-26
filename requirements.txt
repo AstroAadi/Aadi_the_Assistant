@@ -5,14 +5,21 @@
 # Install with:
 #   pip install -r requirements.txt
 #
+# Verify the whole environment afterwards with:
+#   python check_setup.py
+#
 # IMPORTANT WINDOWS PRE-REQUISITES (install manually):
-#   1. espeak-ng  — Required by Kokoro TTS for phoneme generation
+#   1. espeak-ng  — Required by Kokoro TTS for phoneme generation.
+#      REQUIRED for Hindi output (Devanagari phonemes).
 #      Download: https://github.com/espeak-ng/espeak-ng/releases
 #      (e.g. espeak-ng-20191129-b702b03-x64.msi)
-#   2. mpv.exe    — Audio/video player for music streaming
-#      Already installed per user setup.
-#   3. yt-dlp     — Already installed per user setup.
-#   4. Ollama     — Already running per user setup.
+#   2. Ollama     — The local LLM server. https://ollama.com
+#      Then pull the two models Aadi uses (both run on localhost):
+#        ollama pull qwen2.5:0.5b     (router — intent JSON, ~400 MB)
+#        ollama pull gemma3:4b        (chat   — Hindi + English, ~3.3 GB)
+#   3. mpv.exe    — Audio player for music streaming (optional).
+#      winget install mpv   — or drop mpv.exe in your user folder.
+#   4. yt-dlp     — Installed by this file via pip (see Tools section).
 # ============================================================
 
 # --- Wake Word ---
@@ -52,6 +59,9 @@ misaki[en]>=0.1.0             # English G2P for Kokoro
 # --- Tools ---
 ddgs>=1.0.0                   # Web search (renamed from duckduckgo-search). pip install ddgs
 # duckduckgo-search           # legacy name — kept as fallback in code if ddgs not installed
+yt-dlp>=2024.1.1              # Music lookup. Installing it here puts yt-dlp.exe in this
+                              # venv's Scripts folder, which components/tools.py searches
+                              # FIRST — so no path configuration is needed.
 
 # --- Language Detection ---
 langdetect>=1.0.9             # Language identification from text

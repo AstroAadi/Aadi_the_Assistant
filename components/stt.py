@@ -52,6 +52,14 @@ class SpeechToText:
         self.compute_type: str  = stt_cfg.get("compute_type", "int8")
         self.language: Optional[str] = stt_cfg.get("language")  # None = auto-detect
         self.beam_size: int     = int(stt_cfg.get("beam_size", 5))
+        self.cpu_threads: int   = int(stt_cfg.get("cpu_threads", 0))  # 0 = CTranslate2 default
+
+        # Bilingual safety net — see transcribe() docstring.
+        self.low_confidence_retry: bool = bool(stt_cfg.get("low_confidence_retry", True))
+        self.low_confidence_threshold: float = float(
+            stt_cfg.get("low_confidence_threshold", 0.55)
+        )
+        self.retry_language: Optional[str] = stt_cfg.get("retry_language", "hi")
 
         # Noise-guard thresholds — lower = more permissive (accepts more input)
         # Raise these if you get garbage transcriptions from background noise.
@@ -96,12 +104,17 @@ class SpeechToText:
                 self.device,
                 self.compute_type,
             )
-            self._model = WhisperModel(
-                self.model_size,
-                device=self.device,
-                compute_type=self.compute_type,
+            kwargs = {
+                "device": self.device,
+                "compute_type": self.compute_type,
+            }
+            if self.cpu_threads > 0:
+                kwargs["cpu_threads"] = self.cpu_threads
+            self._model = WhisperModel(self.model_size, **kwargs)
+            log.info(
+                "faster-whisper model loaded successfully (cpu_threads=%s).",
+                self.cpu_threads or "auto",
             )
-            log.info("faster-whisper model loaded successfully.")
         except Exception as exc:
             log.error("Failed to load faster-whisper model: %s", exc, exc_info=True)
             self._available = False
@@ -140,13 +153,75 @@ class SpeechToText:
         samples = np.frombuffer(pcm_bytes, dtype=np.int16)
         return samples.astype(np.float32) / 32768.0
 
+    def _run_pass(self, audio_array: np.ndarray, language: Optional[str]):
+        """
+        Run one faster-whisper decode pass.
+
+        Parameters
+        ----------
+        audio_array : np.ndarray
+            Float32 mono audio in [-1, 1].
+        language : str or None
+            Forced language code, or None for auto-detect.
+
+        Returns
+        -------
+        tuple
+            ``(segments_generator, info)`` — the generator is lazy; decoding
+            happens as it is consumed.
+        """
+        return self._model.transcribe(
+            audio_array,
+            beam_size=self.beam_size,
+            language=language,
+            task="transcribe",
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+            initial_prompt=self.initial_prompt,
+        )
+
+    @staticmethod
+    def _pass_score(segments: list) -> float:
+        """
+        Mean average log-probability across segments. Higher (closer to 0)
+        means the decoder was more confident. Empty result scores worst.
+        """
+        if not segments:
+            return float("-inf")
+        scores = [getattr(s, "avg_logprob", -10.0) for s in segments]
+        return sum(scores) / len(scores)
+
+    @staticmethod
+    def _segments_text(segments: list) -> str:
+        """Join segment texts into one trimmed string."""
+        return " ".join(s.text.strip() for s in segments).strip()
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
 
-    def transcribe(self, pcm_bytes: bytes, sample_rate: int = 16000) -> Tuple[str, str]:
+    def transcribe(
+        self,
+        pcm_bytes: bytes,
+        sample_rate: int = 16000,
+        allow_retry: bool = True,
+    ) -> Tuple[str, str]:
         """
         Transcribe raw PCM audio to text.
+
+        Bilingual low-confidence retry
+        ------------------------------
+        Auto-detect is the weak link in an English+Hindi setup: Whisper
+        frequently labels Hindi speech as English with low confidence, then
+        transliterates it badly.  When the first pass comes back under
+        ``low_confidence_threshold``, the same model re-runs once with the
+        language forced to ``retry_language`` and the pass with the better
+        average log-probability wins.
+
+        This costs one extra decode pass only on ambiguous audio and zero
+        extra RAM (same model, no second checkpoint).  Pass
+        ``allow_retry=False`` for latency-critical callers such as the music
+        command listener, which only needs keyword matching.
 
         Noise guard
         -----------
@@ -189,28 +264,21 @@ class SpeechToText:
                 len(pcm_bytes) / (sample_rate * 2),
             )
 
-            # NEW: Pass initial_prompt to bias Whisper towards English/Hindi
-            segments_gen, info = self._model.transcribe(
-                audio_array,
-                beam_size=self.beam_size,
-                language=self.language,   # None = auto-detect
-                task="transcribe",
-                vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 500},
-                initial_prompt=self.initial_prompt,  # NEW: biases language detection
-            )
+            # ----------------------------------------------------------------
+            # Pass 1 — auto-detect (or the language forced in config)
+            # ----------------------------------------------------------------
+            segments_gen, info = self._run_pass(audio_array, self.language)
 
             # ----------------------------------------------------------------
-            # NEW: Early language whitelist check (before consuming segments)
-            # Only reject if VERY confident (prob > 0.85) about wrong language.
-            # Lower confidence detections may be correct despite wrong language guess.
+            # Early language whitelist check (before consuming segments, so we
+            # don't pay for decoding audio we are about to throw away).
+            # Only reject if VERY confident (prob > 0.85) about a wrong
+            # language — lower confidence detections may still be real speech.
             # ----------------------------------------------------------------
             detected_lang = getattr(info, "language", "en")
             lang_prob = getattr(info, "language_probability", 1.0)
 
-            # Only early-reject if we're VERY confident it's a wrong language
-            # (prob > 0.85). This prevents rejecting ambiguous speech as Korean/Latin.
-            if (self._allowed_languages_set and 
+            if (self._allowed_languages_set and
                 detected_lang.lower() not in self._allowed_languages_set and
                 lang_prob > 0.85):
                 log.warning(
@@ -221,6 +289,55 @@ class SpeechToText:
 
             # Proceed to consume segments if language is allowed or no whitelist is set
             segments = list(segments_gen)
+
+            # ----------------------------------------------------------------
+            # Pass 2 — bilingual rescue.
+            # Whisper often tags Hindi speech as English with low confidence.
+            # Re-run once with the language forced and keep the better result.
+            # Skipped for pure noise (pass 1 produced nothing) so background
+            # sound never costs two decodes.
+            # ----------------------------------------------------------------
+            if (allow_retry
+                    and self.low_confidence_retry
+                    and self.language is None
+                    and self.retry_language
+                    and detected_lang.lower() != self.retry_language.lower()
+                    and lang_prob < self.low_confidence_threshold
+                    and len(self._segments_text(segments)) >= self.min_text_length):
+
+                log.info(
+                    "Low language confidence (%s, prob=%.2f < %.2f). "
+                    "Re-running forced as '%s' …",
+                    detected_lang, lang_prob, self.low_confidence_threshold,
+                    self.retry_language,
+                )
+                try:
+                    retry_gen, retry_info = self._run_pass(
+                        audio_array, self.retry_language
+                    )
+                    retry_segments = list(retry_gen)
+
+                    score_first = self._pass_score(segments)
+                    score_retry = self._pass_score(retry_segments)
+                    log.info(
+                        "Retry scores — %s: %.3f  vs  %s: %.3f",
+                        detected_lang, score_first,
+                        self.retry_language, score_retry,
+                    )
+
+                    if score_retry > score_first:
+                        log.info(
+                            "Forced '%s' pass won. Using it.", self.retry_language
+                        )
+                        segments = retry_segments
+                        detected_lang = self.retry_language
+                        lang_prob = getattr(
+                            retry_info, "language_probability", lang_prob
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "Low-confidence retry failed (%s). Keeping first pass.", exc
+                    )
 
             # ----------------------------------------------------------------
             # Original noise / hallucination guards (thresholds from config.json)
@@ -245,8 +362,7 @@ class SpeechToText:
                     )
                     return "", ""
 
-            text_parts = [s.text.strip() for s in segments]
-            full_text  = " ".join(text_parts).strip()
+            full_text = self._segments_text(segments)
 
             if len(full_text) < self.min_text_length:
                 log.warning(

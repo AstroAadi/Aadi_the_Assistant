@@ -1,7 +1,10 @@
 """
 tools.py — Agentic tool implementations for Aadi.
 
-Each tool is a callable ``(user_text: str, llm_response: str) -> str``.
+Each tool is a callable ``(user_text: str, query_hint: str) -> str``.
+``query_hint`` is the cleaned query the router model extracted (song name,
+search query, target personality …); tools fall back to parsing ``user_text``
+themselves when it is empty, so the regex fallback path still works.
 The return value is the spoken result (or an empty string if the tool
 handles speech itself, e.g. music playback).
 
@@ -20,8 +23,11 @@ Adding a new tool
    the intent patterns in ``llm_brain.py``.
 """
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Callable, Dict, Optional
@@ -61,6 +67,65 @@ if not _DDG_AVAILABLE:
     )
 
 
+# ---------------------------------------------------------------------------
+# External executable discovery
+#
+# Nothing is hardcoded to a particular user profile. Candidates are built at
+# import time from the running interpreter and the current user's home, so the
+# project keeps working when it is moved between machines or accounts.
+# ---------------------------------------------------------------------------
+
+def _scripts_dir() -> str:
+    """Directory holding console scripts for the running interpreter."""
+    return os.path.dirname(os.path.abspath(sys.executable))
+
+
+def _yt_dlp_candidates() -> list:
+    """Likely locations for yt-dlp, most specific first."""
+    home = os.path.expanduser("~")
+    scripts = _scripts_dir()
+    candidates = [
+        # Same environment Aadi itself is running in (pip install yt-dlp)
+        os.path.join(scripts, "yt-dlp.exe"),
+        os.path.join(scripts, "yt-dlp"),
+        os.path.join(scripts, "Scripts", "yt-dlp.exe"),
+        "yt-dlp",
+        "yt-dlp.exe",
+        os.path.join(home, "yt-dlp.exe"),
+    ]
+    # Per-user pip installs (--user) across Python versions
+    for root in (
+        os.path.join(home, "AppData", "Roaming", "Python"),
+        os.path.join(home, "AppData", "Local", "Programs", "Python"),
+    ):
+        if os.path.isdir(root):
+            try:
+                for entry in sorted(os.listdir(root), reverse=True):
+                    candidates.append(
+                        os.path.join(root, entry, "Scripts", "yt-dlp.exe")
+                    )
+            except OSError:
+                pass
+    return candidates
+
+
+def _mpv_candidates() -> list:
+    """Likely locations for mpv, most specific first."""
+    home = os.path.expanduser("~")
+    return [
+        "mpv",
+        "mpv.exe",
+        os.path.join(home, "mpv.exe"),
+        os.path.join(home, "mpv", "mpv.exe"),
+        os.path.join(home, "scoop", "shims", "mpv.exe"),
+        os.path.join(home, "Desktop", "mpv.exe"),
+        os.path.join(home, "Downloads", "mpv.exe"),
+        r"C:\mpv\mpv.exe",
+        r"C:\Program Files\mpv\mpv.exe",
+        r"C:\ProgramData\chocolatey\bin\mpv.exe",
+    ]
+
+
 class ToolRegistry:
     """
     Manages and exposes all Aadi tool callables.
@@ -88,23 +153,13 @@ class ToolRegistry:
         tool_cfg = config.get("tools", {})
 
         self.yt_dlp_path: str = self._resolve_executable(
-            tool_cfg.get("yt_dlp_path", "yt-dlp"),
-            candidates=[
-                "yt-dlp",
-                "yt-dlp.exe",
-                r"C:\Users\91760\AppData\Local\Programs\Python\Python311\Scripts\yt-dlp.exe",
-                r"C:\Users\91760\AppData\Roaming\Python\Python311\Scripts\yt-dlp.exe",
-            ],
+            tool_cfg.get("yt_dlp_path"),
+            candidates=_yt_dlp_candidates(),
             name="yt-dlp",
         )
         self.mpv_path: str = self._resolve_executable(
-            tool_cfg.get("mpv_path", "mpv"),
-            candidates=[
-                r"C:\Users\91760\mpv.exe",
-                r"C:\mpv\mpv.exe",
-                "mpv",
-                "mpv.exe",
-            ],
+            tool_cfg.get("mpv_path"),
+            candidates=_mpv_candidates(),
             name="mpv",
         )
         self.music_quality: str = tool_cfg.get("music_quality", "bestaudio/best")
@@ -117,6 +172,11 @@ class ToolRegistry:
         # Track music playback subprocess for stop/resume support
         self._music_proc: Optional[subprocess.Popen] = None
         self._music_lock = threading.Lock()
+        # Monotonic token identifying the current playback request. Bumped on
+        # every start and every stop, so a worker thread that was still
+        # resolving a URL when the user said "stop" can tell it is obsolete
+        # and bail instead of starting playback anyway.
+        self._music_token = 0
 
         # Event is SET while music is actively playing.
         # The main pipeline watches this to mute the microphone recorder.
@@ -139,21 +199,23 @@ class ToolRegistry:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_executable(configured_path: str, candidates: list, name: str) -> str:
+    def _resolve_executable(
+        configured_path: Optional[str], candidates: list, name: str
+    ) -> str:
         """
         Return the first usable path for an external executable.
 
         Resolution order
         ----------------
-        1. The path explicitly set in config.json (if the file exists there).
+        1. The path explicitly set in config.json (file first, then PATH).
         2. Each entry in ``candidates`` — checked as a file path first,
            then via ``shutil.which()`` to search PATH.
 
         Parameters
         ----------
-        configured_path : str
-            Value from config.json (may be a bare name like ``"yt-dlp"``
-            or a full absolute path).
+        configured_path : str or None
+            Value from config.json. ``None`` means "auto-discover", which is
+            the default — see the _path_note in config.json.
         candidates : list of str
             Fallback paths / names to try if ``configured_path`` fails.
         name : str
@@ -162,19 +224,23 @@ class ToolRegistry:
         Returns
         -------
         str
-            Resolved path string (may still be the bare name as last resort
-            so subprocess gives a meaningful FileNotFoundError).
+            Resolved path string (falls back to the bare name so subprocess
+            raises a meaningful FileNotFoundError at call time).
         """
-        import shutil, os
-
-        # 1. Try the configured value first
-        if os.path.isfile(configured_path):
-            log.info("'%s' resolved via config: %s", name, configured_path)
-            return configured_path
-        found = shutil.which(configured_path)
-        if found:
-            log.info("'%s' found on PATH: %s", name, found)
-            return found
+        # 1. Try the configured value first (if one was given)
+        if configured_path:
+            if os.path.isfile(configured_path):
+                log.info("'%s' resolved via config: %s", name, configured_path)
+                return configured_path
+            found = shutil.which(configured_path)
+            if found:
+                log.info("'%s' found on PATH: %s", name, found)
+                return found
+            log.warning(
+                "tools.%s_path in config.json points at '%s', which does not "
+                "exist. Falling back to auto-discovery.",
+                name.replace("-", "_"), configured_path,
+            )
 
         # 2. Try each candidate
         for candidate in candidates:
@@ -183,16 +249,25 @@ class ToolRegistry:
                 return candidate
             found = shutil.which(candidate)
             if found:
-                log.info("'%s' found on PATH via candidate: %s", name, found)
+                log.info("'%s' found on PATH: %s", name, found)
                 return found
 
         log.warning(
-            "'%s' not found via config or candidates. "
-            "Add its full path to config.json under tools.%s_path. "
-            "Keeping '%s' as-is; subprocess will raise FileNotFoundError if missing.",
-            name, name.replace("-", "_"), configured_path,
+            "'%s' not found anywhere. The music tool will not work until it is "
+            "installed, or its absolute path is set in config.json under "
+            "tools.%s_path.\n"
+            "  yt-dlp:  pip install yt-dlp\n"
+            "  mpv:     winget install mpv  (or download mpv.exe and set the path)",
+            name, name.replace("-", "_"),
         )
-        return configured_path  # last resort — will fail loudly at call time
+        return configured_path or name  # will fail loudly at call time
+
+    @property
+    def music_available(self) -> bool:
+        """True when both yt-dlp and mpv resolved to something that exists."""
+        def _ok(path: str) -> bool:
+            return bool(path) and (os.path.isfile(path) or shutil.which(path) is not None)
+        return _ok(self.yt_dlp_path) and _ok(self.mpv_path)
 
     # ------------------------------------------------------------------
     # Registration
@@ -214,10 +289,9 @@ class ToolRegistry:
     # Music tool
     # ------------------------------------------------------------------
 
-    def _tool_music(self, user_text: str, llm_response: str) -> str:
+    def _tool_music(self, user_text: str, query_hint: str = "") -> str:
         """
-        Extract a search query from ``user_text`` and stream audio from
-        YouTube using yt-dlp + mpv in a background thread.
+        Stream audio from YouTube using yt-dlp + mpv in a background thread.
 
         Stops any currently playing music first.
 
@@ -225,37 +299,66 @@ class ToolRegistry:
         ----------
         user_text : str
             Original user utterance.
-        llm_response : str
-            LLM response (may contain song name hint).
+        query_hint : str
+            Song/artist name extracted by the router model. Preferred over
+            regex-stripping ``user_text`` when present, because the router
+            removes filler the regex misses.
 
         Returns
         -------
         str
             Acknowledgement message to be spoken.
         """
-        # --- Clean query from user text ---
-        # Strip leading filler: "play", "plays", "stream", "play me", etc.
-        query = re.sub(
-            r"^\s*(plays?|streams?|put on|play me|stream me)\s+",
-            "",
-            user_text,
-            flags=re.I,
-        ).strip()
-        # Also strip trailing noise like "on youtube", "for me", "please"
-        query = re.sub(
-            r"\s+(on\s+youtube|for\s+me|please|now)\s*$",
-            "",
-            query,
-            flags=re.I,
-        ).strip()
-        # If still empty, fall back to full user text
+        query = (query_hint or "").strip()
+
+        if not query:
+            # --- Clean query from user text ---
+            # Strip leading filler: "play", "plays", "stream", "play me", etc.
+            query = re.sub(
+                r"^\s*(plays?|streams?|put on|play me|stream me)\s+",
+                "",
+                user_text,
+                flags=re.I,
+            ).strip()
+            # Also strip trailing noise like "on youtube", "for me", "please"
+            query = re.sub(
+                r"\s+(on\s+youtube|for\s+me|please|now)\s*$",
+                "",
+                query,
+                flags=re.I,
+            ).strip()
+
+        # Drop a trailing period the STT often adds, then fall back to the
+        # raw utterance if cleaning removed everything.
+        query = query.strip().rstrip(".!?,")
         if not query:
             query = user_text.strip()
 
         log.info("Music tool: searching for '%s'", query)
 
+        if not self.music_available:
+            log.error(
+                "Music requested but yt-dlp and/or mpv are missing "
+                "(yt-dlp='%s', mpv='%s').", self.yt_dlp_path, self.mpv_path,
+            )
+            return (
+                "I can't play music yet because yt-dlp or mpv isn't installed "
+                "on this machine."
+            )
+
         # Stop existing music
         self._stop_music()
+
+        # Claim this playback request.
+        with self._music_lock:
+            self._music_token += 1
+            token = self._music_token
+
+        # Set the flag BEFORE the worker thread starts resolving the URL.
+        # yt-dlp takes a few seconds, and until this flag is set the main loop
+        # happily opens the microphone and records a wasted turn that gets
+        # transcribed as empty. Claim the mic immediately instead.
+        self.music_playing.set()
 
         def _stream() -> None:
             try:
@@ -296,16 +399,25 @@ class ToolRegistry:
                 log.info("Streaming URL (first 80 chars): %s", audio_url[:80])
 
                 with self._music_lock:
+                    # Superseded while yt-dlp was working (user said "stop",
+                    # or asked for a different song) — do not start playing.
+                    if token != self._music_token:
+                        log.info(
+                            "Music request %d was superseded (now %d). "
+                            "Not starting playback.", token, self._music_token,
+                        )
+                        return
                     self._music_proc = subprocess.Popen(
                         [self.mpv_path, "--no-video", "--really-quiet", audio_url],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
+                    proc = self._music_proc
 
                 # Signal to the main pipeline: mic should be muted now
                 self.music_playing.set()
-                log.info("mpv launched (pid=%d). Music playing flag SET.", self._music_proc.pid)
-                self._music_proc.wait()
+                log.info("mpv launched (pid=%d). Music playing flag SET.", proc.pid)
+                proc.wait()
                 log.info("Music playback finished.")
             except FileNotFoundError as exc:
                 log.error(
@@ -323,9 +435,11 @@ class ToolRegistry:
                 log.error("Music tool error: %s", exc, exc_info=True)
                 self._speak("Something went wrong while trying to play music.")
             finally:
-                # Always clear the flag when the thread exits, regardless of reason
-                self.music_playing.clear()
-                log.info("Music playing flag CLEARED.")
+                # Only clear if this thread still owns the current request —
+                # otherwise we would stomp on a newer playback session.
+                if token == self._music_token:
+                    self.music_playing.clear()
+                    log.info("Music playing flag CLEARED.")
 
         t = threading.Thread(target=_stream, daemon=True, name="music-stream")
         t.start()
@@ -335,6 +449,8 @@ class ToolRegistry:
     def _stop_music(self) -> None:
         """Terminate any running music subprocess and clear the playing flag."""
         with self._music_lock:
+            # Invalidate any in-flight request that hasn't started playing yet.
+            self._music_token += 1
             if self._music_proc and self._music_proc.poll() is None:
                 self._music_proc.terminate()
                 try:
@@ -350,19 +466,23 @@ class ToolRegistry:
     # Web search tool
     # ------------------------------------------------------------------
 
-    def _tool_search(self, user_text: str, llm_response: str) -> str:
+    def _tool_search(self, user_text: str, query_hint: str = "") -> str:
         """
         Perform a DuckDuckGo search and return formatted results.
 
-        The LLM brain will receive these results and produce a spoken
-        summary automatically.
+        Runs against DuckDuckGo's public HTML endpoint via the ``ddgs``
+        package — no API key and no account, but note this is the one tool
+        that does leave the machine, because a web search has to.
+
+        The LLM brain receives these results and produces the spoken summary.
 
         Parameters
         ----------
         user_text : str
-            Original user utterance — used directly as the search query.
-        llm_response : str
-            LLM's initial response (not used here).
+            Original user utterance.
+        query_hint : str
+            Cleaned query from the router model. Used as-is when present;
+            otherwise the utterance is stripped of filler here.
 
         Returns
         -------
@@ -372,17 +492,18 @@ class ToolRegistry:
         if not _DDG_AVAILABLE:
             return "Web search is unavailable. Please install ddgs with: pip install ddgs"
 
-        # The query may already be cleaned by LLMBrain._clean_search_query().
-        # Apply a second lighter pass just in case it arrived raw.
-        query = re.sub(
-            r"^(hey aadi[,.]?\s*)?(please\s+)?"
-            r"(tell me |can you |could you )?"
-            r"(search (for |about )?|look up |google |find |"
-            r"what is |what are |who is |when (is |was |did )|where is )?",
-            "",
-            user_text.strip(),
-            flags=re.I,
-        ).strip().rstrip("?.!,;:") or user_text.strip()
+        query = (query_hint or "").strip()
+        if not query:
+            # Arrived raw (regex fallback path) — strip conversational filler.
+            query = re.sub(
+                r"^(hey aadi[,.]?\s*)?(please\s+)?"
+                r"(tell me |can you |could you )?"
+                r"(search (for |about )?|look up |google |find |"
+                r"what is |what are |who is |when (is |was |did )|where is )?",
+                "",
+                user_text.strip(),
+                flags=re.I,
+            ).strip().rstrip("?.!,;:") or user_text.strip()
 
         log.info("Web search: '%s'", query)
 
@@ -423,7 +544,7 @@ class ToolRegistry:
     # Timer tool
     # ------------------------------------------------------------------
 
-    def _tool_timer(self, user_text: str, llm_response: str) -> str:
+    def _tool_timer(self, user_text: str, query_hint: str = "") -> str:
         """
         Parse a duration from the user utterance and start a background timer.
 
@@ -433,16 +554,17 @@ class ToolRegistry:
         ----------
         user_text : str
             User's utterance (e.g. "set a timer for 5 minutes").
-        llm_response : str
-            Not used here.
+        query_hint : str
+            Router's extracted duration phrase, tried first.
 
         Returns
         -------
         str
             Confirmation message.
         """
-        # Parse duration
-        seconds = self._parse_duration(user_text)
+        # Parse duration — prefer the router's extraction, fall back to the
+        # raw utterance (which is usually where the digits actually are).
+        seconds = self._parse_duration(query_hint) or self._parse_duration(user_text)
 
         if seconds <= 0:
             return "I'm not sure how long to set the timer for. Please say something like 'set a timer for 5 minutes'."
@@ -499,18 +621,18 @@ class ToolRegistry:
     # Personality tool
     # ------------------------------------------------------------------
 
-    def _tool_personality(self, user_text: str, llm_response: str) -> str:
+    def _tool_personality(self, user_text: str, query_hint: str = "") -> str:
         """
         Switch Aadi personality based on voice command.
-
-        Parses the target personality from user text (e.g. "switch to study mode").
 
         Parameters
         ----------
         user_text : str
             User utterance containing the target personality name.
-        llm_response : str
-            Not used here.
+        query_hint : str
+            Target mode name as extracted by the router model, e.g. "study".
+            Checked first, because phrasings like "go into study mode" don't
+            match the regex below.
 
         Returns
         -------
@@ -520,14 +642,35 @@ class ToolRegistry:
         if self._personality_manager is None:
             return "Personality switching is not configured."
 
-        # Extract the personality name word
-        match = re.search(
-            r"\b(switch|change)\s+to\s+(\w+)(?:\s+mode)?", user_text, re.I
-        )
-        if not match:
-            return "I couldn't tell which personality to switch to. Try: 'switch to study mode'."
+        key = ""
 
-        key = match.group(2).lower()
+        # 1. Router hint, if it names a real personality
+        hint = (query_hint or "").strip().lower().replace(" mode", "")
+        if hint and self._personality_manager.get_personality(hint) is not None:
+            key = hint
+
+        # 2. Explicit "switch/change to X" phrasing
+        if not key:
+            match = re.search(
+                r"\b(switch|change)\s+to\s+(\w+)(?:\s+mode)?", user_text, re.I
+            )
+            if match:
+                key = match.group(2).lower()
+
+        # 3. Any known personality name mentioned anywhere in the utterance
+        if not key:
+            lowered = user_text.lower()
+            for candidate in self._personality_manager.list_personalities():
+                if candidate.lower() in lowered:
+                    key = candidate.lower()
+                    break
+
+        if not key:
+            return (
+                "I couldn't tell which personality to switch to. Available: "
+                f"{', '.join(self._personality_manager.list_personalities())}."
+            )
+
         success, name = self._personality_manager.switch(key)
 
         if success:
@@ -538,7 +681,7 @@ class ToolRegistry:
     # Clear memory tool
     # ------------------------------------------------------------------
 
-    def _tool_clear_memory(self, user_text: str, llm_response: str) -> str:
+    def _tool_clear_memory(self, user_text: str = "", query_hint: str = "") -> str:
         """
         Wipe the conversation memory at the user's request.
 
@@ -546,7 +689,7 @@ class ToolRegistry:
         ----------
         user_text : str
             Not used here.
-        llm_response : str
+        query_hint : str
             Not used here.
 
         Returns

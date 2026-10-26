@@ -4,12 +4,28 @@ wake_word.py — Wake word detection for Aadi.
 Backend priority
 ----------------
 1. openwakeword (pip install openwakeword) — the original library, ONNX-based,
-   Windows-native, well-tested API, supports hey_aadi, alexa, hey_mycroft, etc.
+   Windows-native, well-tested API.
 2. pyopen-wakeword (pip install pyopen-wakeword) — rhasspy fork, tried as
    fallback.  NOTE: v1.1.0 has a broken OpenWakeWordFeatures.__init__ on some
    Windows installs (requires positional model path args unexpectedly).
 3. Always-on mode — if both fail, Aadi skips wake word and enters
-   conversation mode immediately (useful for testing).
+   conversation mode immediately (useful for testing).  Disable this by
+   setting ``wake_word.allow_always_on_fallback`` to false in config.json.
+
+IMPORTANT — available wake words
+--------------------------------
+openwakeword ships a fixed set of PRETRAINED models:
+
+    alexa, hey_mycroft, hey_jarvis, hey_rhasspy, ok_nabu, timer, weather
+
+There is **no pretrained "hey_aadi" model**.  Asking for one raises
+"Could not find pretrained model for model name 'hey_aadi'" and silently
+drops Aadi into always-on mode.  Two supported options:
+
+  * Use ``"hey_jarvis"`` (the default in config.json), or
+  * Train your own "hey aadi" model and set
+    ``wake_word.custom_model_path`` to the resulting ``.onnx`` file.
+    See https://github.com/dscripka/openWakeWord#training-new-models
 
 Audio requirements:
     16-bit signed PCM, Mono, 16 000 Hz, 80 ms chunks (1280 samples)
@@ -19,6 +35,7 @@ Quick install:
     # Auto-downloads ONNX model files on first run.
 """
 
+import os
 import time
 from typing import Optional
 
@@ -56,15 +73,33 @@ if _BACKEND is None:
         "Fix:  pip install openwakeword"
     )
 
-# openwakeword built-in model name mapping
-_OWW_BUILTIN_NAMES = {
-    "hey_aadi":    "hey_aadi",
-    "hey_mycroft": "hey_mycroft",
-    "alexa":       "alexa",
-    "okay_nabu":   "ok_nabu",
-    "timer":       "timer",
-    "weather":     "weather",
+# ---------------------------------------------------------------------------
+# openwakeword pretrained model names.
+# Anything not in this set must be supplied as a custom .onnx file path.
+# ---------------------------------------------------------------------------
+_OWW_PRETRAINED = {
+    "alexa",
+    "hey_mycroft",
+    "hey_jarvis",
+    "hey_rhasspy",
+    "ok_nabu",
+    "timer",
+    "weather",
 }
+
+# Friendly aliases → real pretrained names
+_OWW_ALIASES = {
+    "okay_nabu":   "ok_nabu",
+    "hey nabu":    "ok_nabu",
+    "hey_jarvis ": "hey_jarvis",
+    "jarvis":      "hey_jarvis",
+    "mycroft":     "hey_mycroft",
+    "rhasspy":     "hey_rhasspy",
+}
+
+# Default used when the configured name is not a real pretrained model
+# and no custom model path was supplied.
+_OWW_DEFAULT = "hey_jarvis"
 
 
 class WakeWordDetector:
@@ -88,15 +123,20 @@ class WakeWordDetector:
         ww_cfg    = config.get("wake_word", {})
         audio_cfg = config.get("audio", {})
 
-        self.model_name        = ww_cfg.get("model", "hey_aadi")
-        self.sensitivity       = float(ww_cfg.get("sensitivity", 0.3))
+        self.model_name         = str(ww_cfg.get("model") or _OWW_DEFAULT)
+        self.custom_model_path  = ww_cfg.get("custom_model_path")
+        self.sensitivity        = float(ww_cfg.get("sensitivity", 0.5))
         self.refractory_seconds = float(ww_cfg.get("refractory_seconds", 2.0))
-        self.mic_device        = audio_cfg.get("mic_device_index")
-        self.sample_rate       = int(audio_cfg.get("sample_rate", 16000))
+        self.allow_always_on    = bool(ww_cfg.get("allow_always_on_fallback", True))
+        self.mic_device         = audio_cfg.get("mic_device_index")
+        self.sample_rate        = int(audio_cfg.get("sample_rate", 16000))
 
         self._model    = None
         self._backend  = _BACKEND
         self._last_det = 0.0
+        # Name actually loaded (may differ from the configured name if we
+        # had to substitute a valid pretrained model).
+        self._loaded_name: Optional[str] = None
 
         if self._backend == "openwakeword":
             self._load_openwakeword()
@@ -104,27 +144,85 @@ class WakeWordDetector:
             self._load_pyopen_wakeword()
 
     # ------------------------------------------------------------------
+    # Name resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_model_target(self) -> str:
+        """
+        Decide what to hand to openwakeword's ``wakeword_models`` list.
+
+        Resolution order
+        ----------------
+        1. ``custom_model_path`` if it points at an existing file.
+        2. The configured name, if it is a real pretrained model (after
+           alias expansion).
+        3. ``_OWW_DEFAULT`` — with a loud warning explaining the swap.
+        """
+        # 1. Custom trained model wins
+        if self.custom_model_path:
+            if os.path.isfile(self.custom_model_path):
+                log.info("Using custom wake word model: %s", self.custom_model_path)
+                return self.custom_model_path
+            log.error(
+                "wake_word.custom_model_path is set but the file does not exist: %s",
+                self.custom_model_path,
+            )
+
+        # 2. Configured name, normalised
+        name = self.model_name.strip().lower().replace(" ", "_").replace("-", "_")
+        name = _OWW_ALIASES.get(name, name)
+        if name in _OWW_PRETRAINED:
+            return name
+
+        # 3. Substitute the default and say exactly why
+        log.warning(
+            "Wake word '%s' is not an openwakeword pretrained model.\n"
+            "  Pretrained models: %s\n"
+            "  Falling back to '%s'. To actually say 'Hey Aadi', train a custom\n"
+            "  model and set wake_word.custom_model_path in config.json.",
+            self.model_name, ", ".join(sorted(_OWW_PRETRAINED)), _OWW_DEFAULT,
+        )
+        return _OWW_DEFAULT
+
+    # ------------------------------------------------------------------
     # Model loading
     # ------------------------------------------------------------------
 
     def _load_openwakeword(self) -> None:
         """Load openwakeword — downloads ONNX files on first run."""
+        target = self._resolve_model_target()
         try:
-            ww_name = _OWW_BUILTIN_NAMES.get(self.model_name.lower(), self.model_name)
             self._model = OWWModel(
-                wakeword_models=[ww_name],
+                wakeword_models=[target],
                 inference_framework="onnx",
             )
-            log.info("openwakeword loaded: '%s' (sensitivity=%.2f)", ww_name, self.sensitivity)
-        except Exception as exc:
-            log.error(
-                "openwakeword failed to load: %s\n"
-                "Run once manually to pre-download models:\n"
-                "  python -c \"from openwakeword.model import Model; "
-                "Model(wakeword_models=['hey_aadi'])\"",
-                exc, exc_info=True,
+            self._loaded_name = target
+            log.info(
+                "openwakeword loaded: '%s' (sensitivity=%.2f)", target, self.sensitivity
             )
-            self._backend = None
+            return
+        except Exception as exc:
+            log.error("openwakeword failed to load '%s': %s", target, exc)
+
+        # One retry with the known-good default before giving up entirely.
+        if target != _OWW_DEFAULT:
+            try:
+                log.info("Retrying wake word load with '%s' …", _OWW_DEFAULT)
+                self._model = OWWModel(
+                    wakeword_models=[_OWW_DEFAULT],
+                    inference_framework="onnx",
+                )
+                self._loaded_name = _OWW_DEFAULT
+                log.info("openwakeword loaded: '%s' (substituted).", _OWW_DEFAULT)
+                return
+            except Exception as exc:
+                log.error("Retry with '%s' also failed: %s", _OWW_DEFAULT, exc)
+
+        log.error(
+            "No wake word model could be loaded. Pre-download them once with:\n"
+            "  python -c \"import openwakeword.utils as u; u.download_models()\"",
+        )
+        self._backend = None
 
     def _load_pyopen_wakeword(self) -> None:
         """Load pyopen-wakeword with graceful handling of the v1.1.0 init bug."""
@@ -189,16 +287,23 @@ class WakeWordDetector:
         is available.
         """
         if self._backend is None:
+            if not self.allow_always_on:
+                log.error(
+                    "Wake word model unavailable and allow_always_on_fallback is "
+                    "false. Refusing to run without wake word detection."
+                )
+                return False
             log.warning(
-                "Wake word unavailable — always-on mode. "
-                "Fix: pip install openwakeword"
+                "Wake word unavailable — ALWAYS-ON mode (no wake word needed). "
+                "Fix: pip install openwakeword, and set a valid "
+                "wake_word.model in config.json."
             )
             time.sleep(1)
             return True
 
         log.info(
             "Listening for '%s' [backend=%s, sensitivity=%.2f] …",
-            self.model_name, self._backend, self.sensitivity,
+            self._loaded_name or self.model_name, self._backend, self.sensitivity,
         )
 
         audio_buf: list[bytes] = []

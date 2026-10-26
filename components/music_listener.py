@@ -199,9 +199,18 @@ class MusicCommandListener:
                         if not pcm:
                             continue
 
-                        # Transcribe
+                        # Transcribe. allow_retry=False keeps this path snappy:
+                        # we only need keyword matching here, so the bilingual
+                        # second decode pass would be wasted latency while the
+                        # user is waiting for the music to actually stop.
                         try:
-                            text, _ = self._transcribe(pcm, self.SAMPLE_RATE)
+                            try:
+                                text, _ = self._transcribe(
+                                    pcm, self.SAMPLE_RATE, allow_retry=False
+                                )
+                            except TypeError:
+                                # Injected transcriber without the extra kwarg
+                                text, _ = self._transcribe(pcm, self.SAMPLE_RATE)
                         except Exception as exc:
                             log.warning("MusicListener transcription error: %s", exc)
                             continue
@@ -245,6 +254,11 @@ class MusicCommandListener:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def is_active(self) -> bool:
+        """True while the listener thread is running."""
+        return self._active
 
     def start(self) -> None:
         """Start the listener thread. No-op if already running."""

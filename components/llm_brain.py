@@ -1,20 +1,36 @@
 """
-llm_brain.py — Agentic AI brain using Ollama.
+llm_brain.py — Agentic AI brain using Ollama (100% local, no external APIs).
+
+Two models, one job each
+------------------------
+``llm.router_model``  (e.g. qwen2.5:0.5b)
+    Phase 1 intent routing only. English-only JSON, ~60 tokens, low ctx.
+    Also used for memory summarisation, where latency is felt mid-turn.
+``llm.chat_model``    (e.g. gemma3:4b)
+    Phase 3 spoken replies and search summarisation — the only places where
+    language quality matters. Gemma's 262k vocab tokenises Devanagari far
+    more efficiently than Qwen's, which matters enormously on a CPU: generic
+    multilingual tokenisers spend 4-8 tokens per Hindi word versus ~1.4 for
+    English, so the same sentence can cost 5x more time in Hindi.
+
+Both are held resident by Ollama's ``keep_alive``, so the split costs RAM
+(~0.4 GB + ~3.3 GB) but no reload time between turns.
 
 Architecture (3-phase pipeline)
 --------------------------------
-Phase 1 — INTENT + ACKNOWLEDGEMENT (fast, ~5-15 tokens)
+Phase 1 — INTENT + ACKNOWLEDGEMENT (fast, ~5-15 tokens, ROUTER model)
     A tiny structured prompt asks the model:
       "What does the user want? Reply ONLY with JSON:
        {intent, acknowledgement, query}"
-    This returns in ~5-10 seconds on CPU. The acknowledgement is
-    spoken immediately so the user is never left in silence.
+    The acknowledgement is spoken immediately so the user is never left in
+    silence. For Hindi turns the acknowledgement is swapped for a canned
+    Devanagari line rather than trusting a 0.5B model to write Hindi.
 
 Phase 2 — TOOL EXECUTION (parallel with speaking)
     While TTS speaks the acknowledgement, the tool runs (search,
     music, timer, etc.). This overlaps latency.
 
-Phase 3 — FINAL ANSWER
+Phase 3 — FINAL ANSWER (CHAT model)
     • search  → one more small LLM call with only the top search snippet
                  as context (not all 5 results — keeps it short and fast)
     • music   → tool already started; speak acknowledgement only
@@ -82,41 +98,40 @@ _ACK_TEMPLATES = {
     INTENT_NONE:        "",
 }
 
-# Phase 1 system prompt — MUST produce compact JSON, nothing else
-_INTENT_SYSTEM_PROMPT = """You are a routing assistant for a voice AI called Aadi.
-The user has spoken a message. You must decide what they want and reply ONLY with a single line of JSON — no explanation, no markdown, no extra text.
-
-JSON format:
-{"intent": "<intent>", "acknowledgement": "<one short spoken sentence>", "query": "<cleaned query or empty>"}
-
-Intent values (pick exactly one):
-- "search"       — user wants information from the internet
-- "music"        — user wants to play a song or stream audio
-- "timer"        — user wants a countdown timer or reminder
-- "personality"  — user wants to switch Aadi mode/personality
-- "clear_memory" — user wants to clear conversation history
-- "none"         — normal conversation, no tool needed
-
-Rules:
-- acknowledgement: a natural spoken sentence Aadi says while the tool runs. Make it personal, warm, and specific to what they asked. Use their name "Aadi" naturally. Examples:
-  - search "Who is Elon Musk" → "Sure Aadi, let me look up Elon Musk for you."
-  - music "play shape of you" → "Playing Shape of You for you, Aadi."
-  - timer "5 minutes" → "Setting a 5 minute timer for you."
-  - none → "" (empty string — Aadi will answer directly)
-- query: for search, the clean search query. For music, the song/artist name. Otherwise empty.
-- Respond with ONLY the JSON line. No other text."""
+# Spoken fallback acknowledgements in Hindi, used when the router returns an
+# empty acknowledgement for a tool intent (a small router model often does).
+_ACK_TEMPLATES_HI = {
+    INTENT_SEARCH:      "ठीक है, मैं इसे खोज रहा हूँ।",
+    INTENT_MUSIC:       "ठीक है, गाना चला रहा हूँ।",
+    INTENT_TIMER:       "ठीक है, टाइमर लगा रहा हूँ।",
+    INTENT_PERSONALITY: "मोड बदल रहा हूँ।",
+    INTENT_CLEAR_MEM:   "ठीक है, मेमोरी साफ़ कर रहा हूँ।",
+    INTENT_NONE:        "",
+}
 
 
 class LLMBrain:
     """
     Orchestrates LLM intent detection, tool dispatch, and final answer generation.
 
+    Two local models, one job each
+    ------------------------------
+    ``router_model``
+        Phase 1 only. Emits English-only JSON, 60 tokens max. A 0.5B model
+        does this in a second or two and never has to speak a word of Hindi.
+    ``chat_model``
+        Phase 3 replies and search summarisation — the only calls where
+        language quality matters. A 4B Gemma handles Devanagari properly.
+
+    Both live in Ollama on localhost and are held in memory by ``keep_alive``,
+    so there is no load cost between turns and nothing leaves the machine.
+
     Parameters
     ----------
     config : dict
         Full Aadi config dict.
     tools : dict
-        Mapping of intent_key → callable(user_text, llm_response) → str.
+        Mapping of intent_key → callable(user_text, query_hint) → str.
     speak_fn : callable, optional
         speak_fn(text, lang="en") — injected so Phase 1 acknowledgement
         can be spoken while Phase 2/3 run. Set after construction via
@@ -124,7 +139,7 @@ class LLMBrain:
     """
 
     _CONNECT_TIMEOUT = 10
-    _READ_TIMEOUT    = 120
+    _READ_TIMEOUT    = 180
     _MAX_RETRIES     = 1
     _RETRY_DELAY     = 1.0
 
@@ -136,10 +151,28 @@ class LLMBrain:
     ) -> None:
         llm_cfg = config.get("llm", {})
 
-        self.ollama_url   = llm_cfg.get("ollama_url", "http://localhost:11434")
-        self.model        = llm_cfg.get("model", "qwen2.5:3b")
-        self.temperature  = float(llm_cfg.get("temperature", 0.7))
-        self.max_tokens   = int(llm_cfg.get("max_tokens", 150))
+        self.ollama_url = llm_cfg.get("ollama_url", "http://localhost:11434")
+
+        # --- Model selection (with back-compat for a single "model" key) ---
+        legacy_model      = llm_cfg.get("model")
+        self.router_model = llm_cfg.get("router_model") or legacy_model or "qwen2.5:0.5b"
+        self.chat_model   = llm_cfg.get("chat_model")   or legacy_model or "gemma3:4b"
+        self._fallback_to_router = bool(llm_cfg.get("fallback_to_router_model", True))
+
+        # Kept as an alias so older code/tests referring to .model still work.
+        self.model = self.chat_model
+
+        self.temperature = float(llm_cfg.get("temperature", 0.7))
+        self.max_tokens  = int(llm_cfg.get("max_tokens", 150))
+
+        self.router_max_tokens        = int(llm_cfg.get("router_max_tokens", 60))
+        self.search_answer_max_tokens = int(llm_cfg.get("search_answer_max_tokens", 80))
+        self.summary_max_tokens       = int(llm_cfg.get("summary_max_tokens", 160))
+
+        self.num_ctx        = int(llm_cfg.get("num_ctx", 2048))
+        self.router_num_ctx = int(llm_cfg.get("router_num_ctx", 1024))
+        self.num_thread     = int(llm_cfg.get("num_thread", 0))  # 0 = let Ollama decide
+        self.keep_alive     = llm_cfg.get("keep_alive", "10m")
 
         self._connect_timeout = int(llm_cfg.get("connect_timeout_s", self._CONNECT_TIMEOUT))
         self._read_timeout    = int(llm_cfg.get("read_timeout_s",    self._READ_TIMEOUT))
@@ -152,10 +185,11 @@ class LLMBrain:
         self._models_endpoint = f"{self.ollama_url}/api/tags"
 
         log.info(
-            "LLMBrain ready — model=%s  connect=%ds  read=%ds  retries=%d",
-            self.model, self._connect_timeout, self._read_timeout, self._max_retries,
+            "LLMBrain ready — router=%s  chat=%s  threads=%s  connect=%ds  read=%ds",
+            self.router_model, self.chat_model, self.num_thread or "auto",
+            self._connect_timeout, self._read_timeout,
         )
-        self._check_model_available()
+        self._check_models_available()
 
     def set_speak_fn(self, fn: Callable) -> None:
         """Inject TTS speak function after construction."""
@@ -171,6 +205,7 @@ class LLMBrain:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         num_ctx: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> str:
         """
         POST to Ollama /api/chat with streaming. Returns assembled reply text.
@@ -186,25 +221,33 @@ class LLMBrain:
         temperature : float, optional
             Sampling temperature. Defaults to self.temperature.
         num_ctx : int, optional
-            Context window size. Defaults to 2048.
+            Context window size. Defaults to self.num_ctx.
+        model : str, optional
+            Which local model to use. Defaults to self.chat_model.
         """
+        options = {
+            "temperature": temperature if temperature is not None else self.temperature,
+            "num_predict": max_tokens if max_tokens is not None else self.max_tokens,
+            "num_ctx": num_ctx if num_ctx is not None else self.num_ctx,
+        }
+        if self.num_thread > 0:
+            options["num_thread"] = self.num_thread
+
+        target_model = model or self.chat_model
+
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": messages,
             "stream": True,
-            "keep_alive": "10m",  # NEW: prevents model unloading between turns
-            "options": {
-                "temperature": temperature if temperature is not None else self.temperature,
-                "num_predict": max_tokens if max_tokens is not None else self.max_tokens,
-                "num_ctx": num_ctx if num_ctx is not None else 2048,
-            },
+            "keep_alive": self.keep_alive,  # prevents unloading between turns
+            "options": options,
         }
 
         last_error: Optional[Exception] = None
 
         for attempt in range(1, self._max_retries + 2):  # +2 so range gives _max_retries+1 tries
             try:
-                log.debug("Ollama call attempt %d …", attempt)
+                log.debug("Ollama call attempt %d (model=%s) …", attempt, target_model)
                 with requests.post(
                     self._api_endpoint,
                     json=payload,
@@ -265,30 +308,72 @@ class LLMBrain:
         """Remove <think>…</think> chain-of-thought blocks from qwen3/deepseek."""
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    def _check_model_available(self) -> None:
-        """Query /api/tags and warn clearly if the model isn't pulled."""
+    @staticmethod
+    def _is_pulled(model: str, pulled: List[str]) -> bool:
+        """True if ``model`` matches any tag in the locally pulled list."""
+        model_tag = model if ":" in model else f"{model}:latest"
+        return any(
+            p == model or p == model_tag or p.startswith(model + ":")
+            for p in pulled
+        )
+
+    def _check_models_available(self) -> None:
+        """
+        Query /api/tags and report on both models.
+
+        If the chat model isn't pulled but the router model is, degrade to the
+        router model rather than failing every turn — Aadi stays usable (with
+        weaker Hindi) until the better model is pulled.
+        """
         try:
             resp = requests.get(self._models_endpoint,
                                 timeout=(self._connect_timeout, 10))
             resp.raise_for_status()
             pulled = [m["name"] for m in resp.json().get("models", [])]
-            model_tag = self.model if ":" in self.model else f"{self.model}:latest"
-            available = any(
-                p == self.model or p == model_tag or p.startswith(self.model + ":")
-                for p in pulled
-            )
-            if available:
-                log.info("Model '%s' is available in Ollama. ✓", self.model)
-            else:
-                log.error(
-                    "Model '%s' is NOT pulled!\n  Available: %s\n"
-                    "  Fix: ollama pull %s",
-                    self.model, pulled or ["(none)"], self.model,
-                )
         except requests.exceptions.ConnectionError:
-            log.error("Cannot reach Ollama at %s to check models.", self.ollama_url)
+            log.error(
+                "Cannot reach Ollama at %s to check models.\n"
+                "  Fix: install Ollama and run 'ollama serve' "
+                "(everything stays on localhost).",
+                self.ollama_url,
+            )
+            return
         except Exception as exc:
             log.warning("Model check failed (non-fatal): %s", exc)
+            return
+
+        router_ok = self._is_pulled(self.router_model, pulled)
+        chat_ok   = self._is_pulled(self.chat_model, pulled)
+
+        if router_ok:
+            log.info("Router model '%s' is available. ✓", self.router_model)
+        else:
+            log.error(
+                "Router model '%s' is NOT pulled!  Fix: ollama pull %s",
+                self.router_model, self.router_model,
+            )
+
+        if chat_ok:
+            log.info("Chat model '%s' is available. ✓", self.chat_model)
+        else:
+            log.error(
+                "Chat model '%s' is NOT pulled!\n  Locally available: %s\n"
+                "  Fix: ollama pull %s",
+                self.chat_model, pulled or ["(none)"], self.chat_model,
+            )
+            if self._fallback_to_router and router_ok:
+                log.warning(
+                    "Falling back to router model '%s' for replies. "
+                    "Hindi quality will be noticeably worse until "
+                    "'%s' is pulled.",
+                    self.router_model, self.chat_model,
+                )
+                self.chat_model = self.router_model
+                self.model = self.chat_model
+
+        # Single-model setups are fine — just say so, so the log isn't confusing.
+        if self.router_model == self.chat_model:
+            log.info("Running single-model mode: '%s'", self.chat_model)
 
     # ------------------------------------------------------------------
     # Phase 1 — Intent detection via LLM
@@ -317,11 +402,12 @@ class LLMBrain:
             (intent, acknowledgement, query)
             Falls back to regex + template on parse failure.
         """
-        # NEW: Language-specific instruction for the acknowledgement
-        lang_instruction = (
-            "Reply in Hindi (Devanagari script)." if user_lang == "hi"
-            else "Reply in English."
-        )
+        # The router ALWAYS works in English, even for Hindi turns.
+        # A 0.5B model asked to emit Devanagari inside JSON tends to break the
+        # JSON and mangle the Hindi at the same time. Instead the spoken
+        # acknowledgement is swapped for a canned Hindi line after parsing —
+        # deterministic, correctly spelled, and free.
+        lang_instruction = "Always write the JSON in English."
 
         structured_prompt = f"""You are a routing assistant for a voice AI called Aadi.
 The user has spoken a message. You must decide what they want and reply ONLY with a single line of JSON — no explanation, no markdown, no extra text.
@@ -360,10 +446,16 @@ Rules:
             {"role": "system", "content": structured_prompt},
             {"role": "user",   "content": user_text},
         ]
-        # num_ctx=1024 — enough for the prompt but fast to load.
+        # router_num_ctx=1024 — enough for the prompt but fast to load.
         # 512 was too small: the model stalled trying to fit the system prompt,
         # causing 30-40s timeouts and always falling back to regex.
-        raw = self._call_ollama(messages, max_tokens=60, temperature=0.1, num_ctx=1024)
+        raw = self._call_ollama(
+            messages,
+            max_tokens=self.router_max_tokens,
+            temperature=0.1,
+            num_ctx=self.router_num_ctx,
+            model=self.router_model,
+        )
         log.debug("Intent LLM raw: %s", raw)
 
         # Extract JSON — model sometimes wraps in ```json ... ```
@@ -382,6 +474,8 @@ Rules:
                 if intent == INTENT_SEARCH and (not query or query == user_text):
                     query = self._clean_search_query(user_text)
 
+                ack = self._resolve_ack(intent, ack, user_lang)
+
                 log.info("Intent (LLM): '%s'  query='%s'  ack='%s'",
                          intent, query, ack)
                 return intent, ack, query
@@ -390,13 +484,32 @@ Rules:
                 log.warning("Intent JSON parse failed (%s). Falling back to regex.", exc)
 
         # Fallback: regex on user text + template acknowledgement
-        return self._detect_intent_regex(user_text)
+        return self._detect_intent_regex(user_text, user_lang)
 
-    def _detect_intent_regex(self, text: str) -> Tuple[str, str, str]:
+    @staticmethod
+    def _resolve_ack(intent: str, ack: str, user_lang: str) -> str:
+        """
+        Produce the acknowledgement that will actually be spoken.
+
+        * Hindi turns always use the canned Devanagari template, so the user
+          never hears an English filler sentence mid-Hindi conversation.
+        * A tool intent with an empty acknowledgement gets the English
+          template — otherwise main.py skips the final speak for tool intents
+          and the user hears nothing at all.
+        """
+        if intent == INTENT_NONE:
+            return ""
+        if user_lang == "hi":
+            return _ACK_TEMPLATES_HI.get(intent, "") or _ACK_TEMPLATES.get(intent, "")
+        return ack or _ACK_TEMPLATES.get(intent, "")
+
+    def _detect_intent_regex(
+        self, text: str, user_lang: str = "en"
+    ) -> Tuple[str, str, str]:
         """Regex fallback when LLM JSON parse fails."""
         for pattern, intent_key in _FALLBACK_PATTERNS:
             if pattern.search(text):
-                ack = _ACK_TEMPLATES.get(intent_key, "")
+                ack = self._resolve_ack(intent_key, "", user_lang)
                 log.info("Intent (regex fallback): '%s'", intent_key)
                 # Clean the query for search intent
                 query = self._clean_search_query(text) if intent_key == INTENT_SEARCH else text
@@ -517,7 +630,12 @@ Rules:
                 ),
             },
         ]
-        answer = self._call_ollama(messages, max_tokens=80, temperature=0.2)
+        answer = self._call_ollama(
+            messages,
+            max_tokens=self.search_answer_max_tokens,
+            temperature=0.2,
+            model=self.chat_model,
+        )
         log.info("Search final answer: %s", answer[:120])
         return answer or snippet
 
@@ -526,8 +644,26 @@ Rules:
     # ------------------------------------------------------------------
 
     def generate_raw(self, prompt: str) -> str:
-        """Single-turn LLM call. Used by ConversationMemory for summarisation."""
+        """Single-turn call on the chat model."""
         return self._call_ollama([{"role": "user", "content": prompt}])
+
+    def summarise(self, prompt: str) -> str:
+        """
+        Memory compression call — deliberately runs on the ROUTER model.
+
+        Summarisation fires in the middle of a conversation turn, so latency
+        is felt directly by the user. Feeding ~800 tokens of history to a 4B
+        model on a 2-core CPU stalls the turn for the better part of a minute;
+        the small router model does an adequate job of compressing history in
+        a couple of seconds. Quality here only affects recall of old turns,
+        not the words Aadi speaks.
+        """
+        return self._call_ollama(
+            [{"role": "user", "content": prompt}],
+            max_tokens=self.summary_max_tokens,
+            temperature=0.3,
+            model=self.router_model,
+        )
 
     def respond(
         self,
@@ -557,13 +693,18 @@ Rules:
 
         Returns
         -------
-        Tuple[str, Optional[str]]
-            (final_spoken_response, intent_key_or_None)
+        Tuple[str, Optional[str], bool]
+            (final_spoken_response, intent_key_or_None, acknowledgement_spoken)
+
+            ``acknowledgement_spoken`` tells main.py whether the user already
+            heard something during Phase 2. Without it, a tool intent whose
+            acknowledgement came back empty would be answered with total
+            silence.
         """
         _speak = speak_fn or self._speak_fn
 
         # ----------------------------------------------------------------
-        # Phase 1: Intent detection via LLM (fast structured call)
+        # Phase 1: Intent detection on the small router model
         # ----------------------------------------------------------------
         intent, acknowledgement, query = self._detect_intent_via_llm(user_text, user_lang)
         log.info("Phase 1 done — intent=%s", intent)
@@ -571,9 +712,11 @@ Rules:
         # ----------------------------------------------------------------
         # Phase 2: Speak acknowledgement immediately (user hears response fast)
         # ----------------------------------------------------------------
+        ack_spoken = False
         if acknowledgement and _speak and intent != INTENT_NONE:
             try:
                 _speak(acknowledgement)
+                ack_spoken = True
                 log.info("Acknowledgement spoken: '%s'", acknowledgement)
             except Exception as exc:
                 log.warning("Failed to speak acknowledgement: %s", exc)
@@ -582,68 +725,76 @@ Rules:
         # Phase 3: Tool execution + final answer
         # ----------------------------------------------------------------
 
+        # Every tool receives the router's cleaned query as a hint. Tools fall
+        # back to parsing user_text themselves when the hint is empty, so the
+        # regex fallback path still works.
+
         # --- Search ---
         if intent == INTENT_SEARCH and INTENT_SEARCH in self._tools:
-            search_query = query or user_text
+            search_query = query or self._clean_search_query(user_text)
             try:
-                results = self._tools[INTENT_SEARCH](search_query, "")
+                results = self._tools[INTENT_SEARCH](user_text, search_query)
                 if results and not results.startswith("I searched") \
                         and not results.startswith("Web search failed"):
-                    # NEW: Pass user_lang to _answer_from_search
                     final = self._answer_from_search(search_query, results, user_lang)
-                    return final, INTENT_SEARCH
-                return results or "I couldn't find anything on that.", INTENT_SEARCH
+                    return final, INTENT_SEARCH, ack_spoken
+                return (results or "I couldn't find anything on that.",
+                        INTENT_SEARCH, ack_spoken)
             except Exception as exc:
                 log.error("Search tool error: %s", exc, exc_info=True)
-                return "The search ran into a problem. Please try again.", INTENT_SEARCH
+                return ("The search ran into a problem. Please try again.",
+                        INTENT_SEARCH, ack_spoken)
 
         # --- Music ---
         if intent == INTENT_MUSIC and INTENT_MUSIC in self._tools:
             try:
-                result = self._tools[INTENT_MUSIC](user_text, "")
+                result = self._tools[INTENT_MUSIC](user_text, query)
                 # Music starts async; tool result is the confirmation string
-                return result or acknowledgement or "Playing that for you.", INTENT_MUSIC
+                return (result or acknowledgement or "Playing that for you.",
+                        INTENT_MUSIC, ack_spoken)
             except Exception as exc:
                 log.error("Music tool error: %s", exc, exc_info=True)
-                return "I couldn't play that. Please try again.", INTENT_MUSIC
+                return ("I couldn't play that. Please try again.",
+                        INTENT_MUSIC, ack_spoken)
 
         # --- Timer ---
         if intent == INTENT_TIMER and INTENT_TIMER in self._tools:
             try:
-                result = self._tools[INTENT_TIMER](user_text, "")
-                return result or acknowledgement or "Timer set.", INTENT_TIMER
+                result = self._tools[INTENT_TIMER](user_text, query)
+                return result or acknowledgement or "Timer set.", INTENT_TIMER, ack_spoken
             except Exception as exc:
                 log.error("Timer tool error: %s", exc, exc_info=True)
-                return "I couldn't set that timer.", INTENT_TIMER
+                return "I couldn't set that timer.", INTENT_TIMER, ack_spoken
 
         # --- Personality / clear memory ---
         if intent in (INTENT_PERSONALITY, INTENT_CLEAR_MEM) \
                 and intent in self._tools:
             try:
-                result = self._tools[intent](user_text, "")
-                return result or acknowledgement or "Done.", intent
+                result = self._tools[intent](user_text, query)
+                return result or acknowledgement or "Done.", intent, ack_spoken
             except Exception as exc:
                 log.error("Tool '%s' error: %s", intent, exc, exc_info=True)
-                return f"I couldn't complete that action.", intent
+                return "I couldn't complete that action.", intent, ack_spoken
 
-        # --- No tool / INTENT_NONE: normal conversational LLM call ---
-        log.info("Phase 3: conversational LLM call.")
-        
-        # NEW: Inject language instruction as the last system message
-        # before the user's turn in conversation_messages
+        # --- No tool / INTENT_NONE: normal conversational call (chat model) ---
+        log.info("Phase 3: conversational call on '%s'.", self.chat_model)
+
+        # Inject the language instruction as the last system message so it is
+        # the most recent thing the model saw before generating.
         messages_with_lang = list(conversation_messages)
-        
+
         lang_system = (
             "IMPORTANT: The user spoke in Hindi. You MUST reply entirely in Hindi using "
-            "Devanagari script. Do not use English. Keep your response under 2 sentences."
+            "Devanagari script. Do not use English. Do not transliterate into Latin "
+            "letters. Keep your response under 2 sentences."
             if user_lang == "hi"
             else "Reply in English. Keep your response under 2 sentences."
         )
-        
+
         messages_with_lang.append({"role": "system", "content": lang_system})
-        
-        reply = self._call_ollama(messages_with_lang)
-        return reply or "I'm not sure what to say.", None
+
+        reply = self._call_ollama(messages_with_lang, model=self.chat_model)
+        return reply or "I'm not sure what to say.", None, ack_spoken
 
     def register_tool(self, key: str, fn: Callable) -> None:
         """Register or replace a tool at runtime."""
